@@ -5,8 +5,7 @@ import {
   unreliableReasons, jackHint, buildCopyText, buildSegmentsSvg, fmtStar, fmtTime, SEG_CAPTION,
 } from './ui-lib.js';
 
-// 反馈入口（OWNER/REPO 是占位，发布前在这里改一处即可）
-export const FEEDBACK_URL = 'https://github.com/OWNER/REPO/issues/new';
+export const FEEDBACK_URL = 'https://github.com/sky2002/osu-star-web/issues/new';
 
 const $ = (sel) => document.querySelector(sel);
 

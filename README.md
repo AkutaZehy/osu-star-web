@@ -3,6 +3,8 @@
 上传 `.osu` 或 `.osz`，在**浏览器本地**算出 osu!mania 4K 谱面的“树星数 v1”。纯静态网页，可以直接放在 GitHub Pages 上；
 使用者不需要安装 Python / PyTorch / CUDA，文件不会上传到任何服务器。
 
+试用网页：https://sky2002.github.io/osu-star-web/ 。反馈：https://github.com/sky2002/osu-star-web/issues/new 。
+
 - 版本：树星数 v1（研究项目里的模型名 P1h，冻结日期 2026-10-14）。
 - 含义：平均要多强的玩家，才能在这张谱上打到 96% 准确率（stable ScoreV1 口径，用谱面文件里的 OD）。
 - 刻度：星数 = 5.2338 + 1.6089 × 读数。它和以前本机网页上的“公共星数”（4.6146 + 1.3714·θ\*）不是同一把尺子，难谱上大约高 1 星以上，不要混着比较。
@@ -110,13 +112,18 @@ Node 测试走单线程路径（辅助 worker 路径用同一函数，浏览器�
 另有 `tests/tdist_check.mjs`（Student-t 表与 Python 表 60.6 万项逐位相同）、`tests/flags_check.mjs`
 （变速 / storyboard 判定与研究库谱表在 3,100 张排名谱上判定全部一致）。
 
+发布前复核（2026-10-14）仅重新抽样 24 个输入案例（23 个不同难度，含同谱 `.osu`/`.osz` 双路径）：16 个定向 `test_beatmap` 样本覆盖米谱、长条、长马拉松、Eta、高难谱和 3 个少于 20 物件的拒绝案例；
+另从既有随机 200 张排名谱中按星数四分位分层，每层用固定种子 20261014 再抽 2 张。24 个结果均通过：21 张出读数、3 张双方拒绝；
+21 张星数均与 Python 参考逐位相同，θ* 最大差 1.44e-7，22 项特征最大差 8.89e-16。另复核非 mania、非 4K、压缩包难度筛选、storyboard 提示和分段曲线。
+本次复用了上述 374 张历史全量结果，没有重新执行全量回读；有限抽样不能证明所有谱面都正确。
+
 ## 部署到 GitHub Pages（由项目维护者决定后再做）
 
-1. 在 GitHub 新建一个仓库（公开仓库才能免费用 Pages），把本目录推上去（`node_modules/`、`tests/out/`、`.pydeps/` 已在 `.gitignore`）。
-2. 改反馈地址：`docs/js/app.js` 顶部 `FEEDBACK_URL = 'https://github.com/OWNER/REPO/issues/new'` 里的 `OWNER/REPO` 换成实际仓库；
+1. 仓库地址：`https://github.com/sky2002/osu-star-web`。把本目录推上去（`node_modules/`、`tests/out/`、`.pydeps/` 已在 `.gitignore`）。
+2. 反馈地址已经设置为 `https://github.com/sky2002/osu-star-web/issues/new`；
    仓库 Settings → General → Features 勾选 Issues。
-3. Settings → Pages → Build and deployment → Source 选 “Deploy from a branch”，Branch 选 `main`，文件夹选 `/docs`，保存。
-4. 等一两分钟，站点地址是 `https://<用户名>.github.io/<仓库名>/`。打开后拖一张谱试算，确认状态栏显示“模型已就绪”。
+3. Settings → Pages → Build and deployment → Source 选 “Deploy from a branch”，Branch 选 `master`，文件夹选 `/docs`，保存。`docs/.nojekyll` 使站点按纯静态文件服务。
+4. 站点地址是 `https://sky2002.github.io/osu-star-web/`。部署完成后打开并拖一张谱试算，确认状态栏显示“模型已就绪”。
 5. 注意：站点和模型文件对任何拿到网址的人公开；仓库公开时源代码、测试夹具（谱面文件名与读数）也公开。
 
 更新模型时：在研究仓库重跑 `export.py` 与 `reference.py`，跑 `tests/compare.mjs`，确认后改 `docs/js/engine.js` 里的 `VERSION` / `FROZEN` 再推送。
