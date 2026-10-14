@@ -1,5 +1,6 @@
 // 页面用到的纯函数（不碰 DOM，Node 里也能直接 import 测试）。
 import { unzipSync } from '../vendor/fflate/fflate.mjs';
+import { danReferenceCopyLines } from './dan-reference.js';
 
 export const STAR_NOTE_JACK =
   'jack/chordjack 较多：按 acc 定义，读数通常比段位手感低约 1 段';
@@ -136,7 +137,7 @@ export function jackHint(result) {
 }
 
 /** 「复制读数信息」的多行文本。ver 为 ready 消息的 {version, frozen}。 */
-export function buildCopyText(result, header, fileName, ver) {
+export function buildCopyText(result, header, fileName, ver, references) {
   const meta = mergeMeta(header, result);
   const verText = ver && ver.version
     ? `${ver.version}（冻结日期 ${ver.frozen || '未知'}）` : '未知';
@@ -159,6 +160,7 @@ export function buildCopyText(result, header, fileName, ver) {
   }
   const jh = jackHint(result);
   if (jh) lines.push(`提示：${jh}`);
+  if (result && result.ok) lines.push(...danReferenceCopyLines(references));
   return lines.join('\n');
 }
 

@@ -1,0 +1,264 @@
+{
+  "version": "P1h",
+  "modelVersion": "树星数 v1 (P1h)",
+  "frozen": "2026-10-14",
+  "groups": [
+    {
+      "id": "reform",
+      "label": "REFORM 主线",
+      "entries": [
+        {
+          "id": "reform-intro-1st",
+          "label": "REFORM INTRO-1st",
+          "star": 1.4297224115168565,
+          "reliable": true,
+          "url": "https://osu.ppy.sh/beatmaps/2259508"
+        },
+        {
+          "id": "reform-intro-2nd",
+          "label": "REFORM INTRO-2nd",
+          "star": 1.555753918980229,
+          "reliable": true,
+          "url": "https://osu.ppy.sh/beatmaps/2259509"
+        },
+        {
+          "id": "reform-intro-3rd",
+          "label": "REFORM INTRO-3rd",
+          "star": 2.454824096842106,
+          "reliable": true,
+          "url": "https://osu.ppy.sh/beatmaps/2259510"
+        },
+        {
+          "id": "reform-1st",
+          "label": "REFORM 1st",
+          "star": 2.621182028344216,
+          "reliable": true,
+          "url": "https://osu.ppy.sh/beatmaps/2259503"
+        },
+        {
+          "id": "reform-2nd",
+          "label": "REFORM 2nd",
+          "star": 2.8844685667522376,
+          "reliable": true,
+          "url": "https://osu.ppy.sh/beatmaps/2259504"
+        },
+        {
+          "id": "reform-3rd",
+          "label": "REFORM 3rd",
+          "star": 2.900542901668368,
+          "reliable": true,
+          "url": "https://osu.ppy.sh/beatmaps/2259505"
+        },
+        {
+          "id": "reform-4th",
+          "label": "REFORM 4th",
+          "star": 3.601225917805801,
+          "reliable": true,
+          "url": "https://osu.ppy.sh/beatmaps/2259506"
+        },
+        {
+          "id": "reform-5th",
+          "label": "REFORM 5th",
+          "star": 4.1966099541044555,
+          "reliable": true,
+          "url": "https://osu.ppy.sh/beatmaps/2259507"
+        },
+        {
+          "id": "reform-6th",
+          "label": "REFORM 6th",
+          "star": 4.580144073119622,
+          "reliable": true,
+          "url": "https://osu.ppy.sh/beatmaps/2588623"
+        },
+        {
+          "id": "reform-7th",
+          "label": "REFORM 7th",
+          "star": 5.08293399602718,
+          "reliable": true,
+          "url": "https://osu.ppy.sh/beatmaps/2259541"
+        },
+        {
+          "id": "reform-8th",
+          "label": "REFORM 8th",
+          "star": 5.444362960800007,
+          "reliable": true,
+          "url": "https://osu.ppy.sh/beatmaps/2259542"
+        },
+        {
+          "id": "reform-9th",
+          "label": "REFORM 9th",
+          "star": 5.768447199481068,
+          "reliable": true,
+          "url": "https://osu.ppy.sh/beatmaps/2259543"
+        },
+        {
+          "id": "reform-10th",
+          "label": "REFORM 10th",
+          "star": 5.9506231050427125,
+          "reliable": true,
+          "url": "https://osu.ppy.sh/beatmaps/2259539"
+        },
+        {
+          "id": "reform-alpha",
+          "label": "REFORM Alpha",
+          "star": 6.324007134179466,
+          "reliable": true,
+          "url": "https://osu.ppy.sh/beatmaps/2259544"
+        },
+        {
+          "id": "reform-beta",
+          "label": "REFORM Beta",
+          "star": 6.411102001894303,
+          "reliable": true,
+          "url": "https://osu.ppy.sh/beatmaps/2259545"
+        },
+        {
+          "id": "reform-gamma",
+          "label": "REFORM Gamma",
+          "star": 7.000828376244918,
+          "reliable": true,
+          "url": "https://osu.ppy.sh/beatmaps/2259548"
+        },
+        {
+          "id": "reform-delta",
+          "label": "REFORM Delta",
+          "star": 7.409529163033522,
+          "reliable": true,
+          "url": "https://osu.ppy.sh/beatmaps/2259546"
+        },
+        {
+          "id": "reform-epsilon",
+          "label": "REFORM Epsilon",
+          "star": 8.243952071740724,
+          "reliable": true,
+          "url": "https://osu.ppy.sh/beatmaps/2259547"
+        },
+        {
+          "id": "reform-zeta",
+          "label": "REFORM Zeta",
+          "star": 8.65073472075541,
+          "reliable": true,
+          "url": "https://osu.ppy.sh/beatmaps/2738788"
+        },
+        {
+          "id": "reform-eta",
+          "label": "REFORM Eta",
+          "star": 9.785724465518784,
+          "reliable": false,
+          "url": "https://osu.ppy.sh/beatmaps/2738787"
+        }
+      ]
+    },
+    {
+      "id": "ln",
+      "label": "LN Dan Courses v2",
+      "entries": [
+        {
+          "id": "ln-1",
+          "label": "LN 1st Dan",
+          "star": 3.777575189790848,
+          "reliable": true,
+          "url": "https://osu.ppy.sh/beatmaps/1862813"
+        },
+        {
+          "id": "ln-3",
+          "label": "LN 3rd Dan",
+          "star": 4.337743357064524,
+          "reliable": true,
+          "url": "https://osu.ppy.sh/beatmaps/1862815"
+        },
+        {
+          "id": "ln-2",
+          "label": "LN 2nd Dan",
+          "star": 4.448944417680536,
+          "reliable": true,
+          "url": "https://osu.ppy.sh/beatmaps/1862814"
+        },
+        {
+          "id": "ln-5",
+          "label": "LN 5th Dan",
+          "star": 4.603128683212556,
+          "reliable": true,
+          "url": "https://osu.ppy.sh/beatmaps/1862832"
+        },
+        {
+          "id": "ln-4",
+          "label": "LN 4th Dan",
+          "star": 4.728096227026027,
+          "reliable": true,
+          "url": "https://osu.ppy.sh/beatmaps/1862816"
+        },
+        {
+          "id": "ln-6",
+          "label": "LN 6th Dan",
+          "star": 4.932527173345459,
+          "reliable": true,
+          "url": "https://osu.ppy.sh/beatmaps/1862833"
+        },
+        {
+          "id": "ln-7",
+          "label": "LN 7th Dan",
+          "star": 5.210547105273954,
+          "reliable": true,
+          "url": "https://osu.ppy.sh/beatmaps/1862834"
+        },
+        {
+          "id": "ln-8",
+          "label": "LN 8th Dan",
+          "star": 5.3772580150365386,
+          "reliable": true,
+          "url": "https://osu.ppy.sh/beatmaps/1862842"
+        },
+        {
+          "id": "ln-9",
+          "label": "LN 9th Dan",
+          "star": 5.627429749145348,
+          "reliable": true,
+          "url": "https://osu.ppy.sh/beatmaps/1862843"
+        },
+        {
+          "id": "ln-10",
+          "label": "LN 10th Dan",
+          "star": 5.931702548257773,
+          "reliable": true,
+          "url": "https://osu.ppy.sh/beatmaps/1862841"
+        },
+        {
+          "id": "ln-11",
+          "label": "LN 11th Dan - Yoake",
+          "star": 6.283572794045977,
+          "reliable": true,
+          "url": "https://osu.ppy.sh/beatmaps/1862874"
+        },
+        {
+          "id": "ln-12",
+          "label": "LN 12th Dan - Yuugure",
+          "star": 6.504571742211992,
+          "reliable": true,
+          "url": "https://osu.ppy.sh/beatmaps/1862875"
+        },
+        {
+          "id": "ln-13",
+          "label": "LN 13th Dan - Yoru",
+          "star": 6.877191146436715,
+          "reliable": true,
+          "url": "https://osu.ppy.sh/beatmaps/1862876"
+        },
+        {
+          "id": "ln-14",
+          "label": "LN 14th Dan - Yami",
+          "star": 7.4150867777609895,
+          "reliable": true,
+          "url": "https://osu.ppy.sh/beatmaps/2332319"
+        },
+        {
+          "id": "ln-15",
+          "label": "LN 15th Dan - Yume",
+          "star": 7.466040173196552,
+          "reliable": true,
+          "url": "https://osu.ppy.sh/beatmaps/2332320"
+        }
+      ]
+    }
+  ]
+}

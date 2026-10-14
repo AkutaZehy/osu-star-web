@@ -1,6 +1,9 @@
 // 页面逻辑：拖放/选择文件 → 主线程读头部 → 逐个送 worker 计算 → 渲染结果卡片。
 import { spawnHelpers } from './pool.js';
 import {
+  validateDanReferences, referencesForModel, selectDanReferences, DAN_REFERENCE_NOTE, DAN_REFERENCE_WARNING,
+} from './dan-reference.js';
+import {
   listOsz, parseOsuHeader, decodeText, skipReason, mergeMeta, displayName,
   unreliableReasons, jackHint, buildCopyText, buildSegmentsSvg, fmtStar, fmtTime, SEG_CAPTION,
 } from './ui-lib.js';
@@ -34,7 +37,27 @@ const state = {
   items: [],
   current: null,
   uid: 0,
+  references: null,
+  referencesPhase: 'loading',
 };
+
+async function loadDanReferences() {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 10000);
+  try {
+    const response = await fetch(new URL('../data/dan-references.json', import.meta.url), { signal: controller.signal });
+    if (!response.ok) throw new Error('段位参考加载失败');
+    state.references = validateDanReferences(await response.json());
+    state.referencesPhase = 'ready';
+  } catch {
+    state.referencesPhase = 'error';
+  } finally {
+    clearTimeout(timeout);
+    for (const item of state.items) {
+      if (item.status === 'done' && item.result?.ok) renderItem(item);
+    }
+  }
+}
 
 function setStatus(kind, text) {
   const box = $('#status');
@@ -252,6 +275,7 @@ function renderItem(it) {
     }
     const jh = jackHint(r);
     if (jh) extra.push(h('div', { class: 'note', text: jh }));
+    extra.push(danReferencePanel(r));
     const svg = buildSegmentsSvg(r.segments, r.hardest);
     if (svg) {
       const box = h('div', { class: 'seg' });
@@ -274,6 +298,40 @@ function renderItem(it) {
   el.append(side, h('div', { class: 'body' }, info, extra));
 }
 
+function danReferencePanel(result) {
+  const panel = h('section', { class: 'dan-reference', 'aria-label': '附近段位参考谱' },
+    h('h3', { text: '附近段位参考谱' }));
+  const view = selectDanReferences(result, referencesForModel(state.references, state.ver));
+  if (!view?.available) {
+    panel.append(h('p', { class: 'muted dan-caption', text: state.referencesPhase === 'loading' ? '正在加载段位参考…' : '段位参考暂不可用；星数计算不受影响。' }));
+    return panel;
+  }
+  panel.append(h('p', { class: 'muted dan-caption', text: DAN_REFERENCE_NOTE }));
+  if (view.resultUnreliable) panel.append(h('p', { class: 'dan-caution', text: DAN_REFERENCE_WARNING }));
+  const groups = h('div', { class: 'dan-groups' });
+  for (const group of view.groups) {
+    const section = h('div', { class: 'dan-group' }, h('h4', { text: group.label }));
+    if (!group.matches.length) {
+      section.append(h('p', { class: 'muted dan-empty', text: '暂无接近的参考谱' }));
+    } else {
+      const list = h('ul', { class: 'dan-list' });
+      for (const entry of group.matches) {
+        const name = entry.url
+          ? h('a', { href: entry.url, target: '_blank', rel: 'noopener', text: entry.label })
+          : h('span', { text: entry.label });
+        list.append(h('li', null,
+          h('div', { class: 'dan-name' }, name, entry.reliable ? null : h('span', { class: 'dan-caution', text: '读数不可靠' })),
+          h('strong', { class: 'dan-star', text: '★ ' + fmtStar(entry.star) })));
+      }
+      section.append(list);
+    }
+    if (group.note) section.append(h('p', { class: 'muted dan-caption', text: group.note }));
+    groups.append(section);
+  }
+  panel.append(groups);
+  return panel;
+}
+
 function subline(it, meta) {
   const r = it.result;
   const bits = [];
@@ -292,7 +350,8 @@ function copyRow(it) {
   const btn = h('button', { type: 'button', class: 'btn small', text: '复制读数信息' });
   const row = h('div', { class: 'actions' }, btn);
   btn.addEventListener('click', async () => {
-    const text = buildCopyText(it.result, it.header, it.name, state.ver);
+    const references = selectDanReferences(it.result, referencesForModel(state.references, state.ver));
+    const text = buildCopyText(it.result, it.header, it.name, state.ver, references);
     const ok = await copyText(text);
     row.querySelector('textarea')?.remove();
     if (ok) {
@@ -364,3 +423,4 @@ function setupUi() {
 
 setupUi();
 startWorker();
+loadDanReferences();

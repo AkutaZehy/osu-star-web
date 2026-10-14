@@ -5,7 +5,8 @@
   "description": "Browser-side osu!mania 4K tree star v1 (P1h) reader",
   "type": "module",
   "scripts": {
-    "test": "node tests/compare.mjs"
+    "test": "node tests/compare.mjs",
+    "test:references": "node tests/dan-reference.mjs"
   },
   "dependencies": {
     "fflate": "0.8.3",
