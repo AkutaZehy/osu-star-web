@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>osu!mania 4K 树星数 v1（试用版）</title>
+<meta name="description" content="在浏览器本地计算 osu!mania 4K 谱面的树星数 v1，文件不会上传。">
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<header class="top">
+  <div class="wrap top-in">
+    <h1>osu!mania 4K 树星数 v1（试用版）</h1>
+    <a class="fb" data-feedback href="#" target="_blank" rel="noopener">反馈 / 报告读数不对</a>
+  </div>
+</header>
+
+<main class="wrap">
+  <p class="lead">在你的浏览器本地计算，文件不会上传到任何服务器。</p>
+
+  <div id="status" class="status loading" role="status" aria-live="polite">
+    <span class="dot" aria-hidden="true"></span><span id="status-text">正在加载模型（首次约 15 MB）…</span>
+  </div>
+
+  <label id="drop" class="drop" for="file-input">
+    <input id="file-input" type="file" accept=".osu,.osz" multiple hidden>
+    <span class="drop-title">把 .osu 或 .osz 文件拖到这里</span>
+    <span class="drop-sub">可以一次放多个；.osz 会列出里面的全部难度</span>
+    <button type="button" id="pick" class="btn primary">选择文件</button>
+  </label>
+
+  <section id="results-sec" class="results-sec" hidden>
+    <div class="results-head">
+      <h2>结果</h2>
+      <button type="button" id="clear" class="btn small">清空</button>
+    </div>
+    <div id="results"></div>
+  </section>
+
+  <section class="help" aria-label="说明">
+    <h2>说明</h2>
+    <details open>
+      <summary>星数是什么意思</summary>
+      <p>平均要多强的玩家，才能在这张谱上打到 96% 的准确率（stable ScoreV1 口径，用谱面文件里的 OD）。数越大越难。</p>
+    </details>
+    <details>
+      <summary>版本</summary>
+      <p>树星数 v1（模型 P1h，冻结日期 2026-10-14）。它和之前本机网页上的“公共星数”刻度不同，难谱上大约高 1 星以上，不要混着比较。</p>
+    </details>
+    <details>
+      <summary>这不是官方星数</summary>
+      <p>这不是 osu! 官方星数，也不会和它一一对应。只给 1.0 倍速的读数，不计算 DT / HT 等 mod。</p>
+    </details>
+    <details>
+      <summary>什么谱会被拒绝</summary>
+      <p>不是 mania、不是 4K、物件少于 20 个的谱不会出读数。</p>
+    </details>
+    <details>
+      <summary>什么情况会标“不可靠”</summary>
+      <ul>
+        <li>有变速：超过 10% 的物件处，滚动速度偏离主速度 10% 以上。训练时排除了这类谱，读数未经检验。</li>
+        <li>带 storyboard：.osz 里有 .osb 文件，或 .osu 里有 Sprite / Animation 事件。这类可能是观赏或特效谱，读数未经检验。</li>
+        <li>超出排名谱训练范围：星数高于排名谱最高读数（约 8.9 星），或某项谱面特征超出排名谱的范围。</li>
+      </ul>
+      <p>标了“不可靠”的读数只能当参考，别太当真。</p>
+    </details>
+    <details>
+      <summary>“jack/chordjack 较多”提示</summary>
+      <p>jack（同一列连打）或 chordjack（多键同时连打）占比较高的谱，按 acc 定义，读数通常比段位手感低约 1 段。这条经验来自米谱（REFORM 段位），长条为主的谱不提示。</p>
+    </details>
+    <details>
+      <summary>隐私</summary>
+      <p>所有计算都在你本机的浏览器里完成，文件不上传。模型文件是公开的，任何人都能下载。</p>
+    </details>
+  </section>
+</main>
+
+<footer class="foot">
+  <div class="wrap">
+    <p><a class="fb" data-feedback href="#" target="_blank" rel="noopener">反馈 / 报告读数不对</a></p>
+    <p class="muted">先点结果旁的“复制读数信息”，再粘贴进反馈。本页面不收集、不上传任何数据。</p>
+  </div>
+</footer>
+
+<script type="module" src="js/app.js"></script>
+</body>
+</html>

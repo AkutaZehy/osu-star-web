@@ -1,0 +1,314 @@
+// theta* reader of r2-final-s29, ported from analysis/public-star-r1/ps_engine.PublicStarEngine.per_action (v1 only),
+// dan-readout rules.py (expected ScoreV1 accuracy from per-action Student-t errors) and anchor.theta_star_grid.
+// The encoder runs in onnxruntime-web; everything after it is plain JS. Float32 steps of the PyTorch reference are
+// mirrored with Math.fround so the per-action scores match closely.
+import { f32 } from './pyutil.js';
+
+const V1_W = [1, 1, 2 / 3, 1 / 3, 1 / 6];
+const GL_X = [-0.9894009349916499, -0.9445750230732326, -0.8656312023878318, -0.755404408355003, -0.6178762444026438,
+  -0.45801677765722737, -0.2816035507792589, -0.09501250983763744, 0.09501250983763744, 0.2816035507792589,
+  0.45801677765722737, 0.6178762444026438, 0.755404408355003, 0.8656312023878318, 0.9445750230732326, 0.9894009349916499];
+// numpy.polynomial.legendre.leggauss(16) (numpy 2.5.3), copied exactly
+const GL_W = [0.027152459411754176, 0.062253523938647456, 0.0951585116824926, 0.12462897125553407, 0.1495959888165767,
+  0.16915651939500265, 0.18260341504492364, 0.18945061045506864, 0.18945061045506864, 0.18260341504492364,
+  0.16915651939500265, 0.1495959888165767, 0.12462897125553407, 0.0951585116824926, 0.062253523938647456, 0.027152459411754176];
+const GX = GL_X.map(f32), GW = GL_W.map(f32);
+
+// osu_diff.stable_judgement.hit_windows(od) (NoMod): MAX, 300, 200, 100, 50, earliest
+export function v1Windows(od) {
+  if (!Number.isFinite(od) || od < 0 || od > 10) throw new Error('Stable OD must be finite and between 0 and 10');
+  const diff = f32(10 - f32(od));
+  return [16, ...[34, 67, 97, 121, 158].map(b => Math.trunc(f32(b + f32(3 * diff))))];
+}
+
+export class Reader {
+  constructor(R, table, session, ort) {
+    this.R = R; this.tab = table; this.sess = session; this.ort = ort;
+    this.G = 8193; this.P = R.theta_grid.length;
+    this.nu = Float32Array.from(R.t_nus_f32);
+    this.logc = Float32Array.from(R.t_logc.map(f32));
+    this.gs = R.group_scale.map(f32);
+    this.terms = {};
+    for (const k of ['ls0', 'ls1', 'mu0', 'mu1', 'lg0', 'lg1']) this.terms[k] = Float64Array.from(R.terms[k].flat());
+    this.dw = [0, f32(V1_W[1] - V1_W[2]), f32(V1_W[2] - V1_W[3]), f32(V1_W[3] - V1_W[4]), f32(V1_W[4])];
+    this.lnSpecs = [[1.1, 2.2, V1_W[1] - V1_W[2]], [1, 2, V1_W[2] - V1_W[3]], [1, 2, V1_W[3] - V1_W[4]]];
+  }
+
+  cdf(z, q) {
+    const u = f32(z / f32(Math.abs(z) + 4));
+    let pos = f32(f32(u + 1) * 4096);
+    if (pos < 0) pos = 0; else if (pos > 8192) pos = 8192;
+    let i0 = Math.floor(pos); if (i0 > 8191) i0 = 8191;
+    const fr = f32(pos - i0);
+    const b = q * this.G + i0;
+    const v0 = this.tab[b], v1 = this.tab[b + 1];
+    return f32(v0 + f32(f32(v1 - v0) * fr));
+  }
+
+  pdf(z, q) {
+    const nu = this.nu[q];
+    return f32(Math.exp(f32(this.logc[q] - f32(f32(0.5 * f32(nu + 1)) * f32(Math.log1p(f32(f32(z * z) / nu)))))));
+  }
+
+  pint(lo, hi, mu, sig, q) {
+    const d = f32(this.cdf(f32(f32(hi - mu) / sig), q) - this.cdf(f32(f32(lo - mu) / sig), q));
+    return d > 0 ? d : 0;
+  }
+
+  headScore(mu, sig, q, W) {   // W: 5 windows (+0.5) float32
+    let s = 0;
+    for (let g = 1; g < 5; g++) s = f32(s + f32(this.dw[g] * this.pint(-W[g], W[g], mu, sig, q)));
+    return s;
+  }
+
+  // chart constants of rules.v1_ln_score (they depend only on the OD windows)
+  lnConstants(w) {
+    const c = { w4e: f32(w[4] + 0.5), A: new Float64Array(3), B: new Float64Array(3), U: new Float64Array(3), dw: new Float64Array(3) };
+    const wins = [w[1], w[2], w[3]];
+    for (let k = 0; k < 3; k++) {
+      const [fa, fb, dwv] = this.lnSpecs[k];
+      c.A[k] = f32(Math.floor(f32(f32(f32(fa) * wins[k]) + f32(1e-6))) + 0.5);
+      c.B[k] = f32(Math.floor(f32(f32(f32(fb) * wins[k]) + f32(1e-6))) + 0.5);
+      c.U[k] = Math.min(c.A[k], c.B[k]);
+      c.dw[k] = f32(dwv);
+    }
+    c.v14 = f32(V1_W[4]);
+    return c;
+  }
+
+  lnScore(muH, sigH, qH, muT, sigT, qT, C) {   // rules.v1_ln_score
+    const w4e = C.w4e;
+    const fullRaw = f32(1 - this.cdf(f32(f32(-w4e - muT) / sigT), qT));
+    const nm = Math.min(Math.max(fullRaw, 0), 1);
+    let out = f32(C.v14 * nm);
+    const full = fullRaw > 0 ? fullRaw : 0;
+    const m0 = f32(Math.abs(muH) + f32(4 * sigH));
+    for (let k = 0; k < 3; k++) {
+      const B = C.B[k], U = C.U[k];
+      const m = Math.min(m0, U);
+      let tot = 0;
+      for (let half_i = 0; half_i < 2; half_i++) {
+        const a0 = half_i ? m : 0, a1 = half_i ? U : m;
+        const half = f32(0.5 * f32(a1 - a0));
+        const mid = f32(a0 + half);
+        let acc = 0;
+        for (let i = 0; i < 16; i++) {
+          const h = f32(mid + f32(half * GX[i]));
+          const fh = f32(f32(this.pdf(f32(f32(h - muH) / sigH), qH) + this.pdf(f32(f32(-h - muH) / sigH), qH)) / sigH);
+          const s = f32(B - h);
+          let G;
+          if (s >= w4e) G = full;
+          else {
+            const ins = f32(this.cdf(f32(f32(s - muT) / sigT), qT) - this.cdf(f32(f32(-s - muT) / sigT), qT));
+            G = ins > 0 ? ins : 0;
+          }
+          acc += f32(f32(fh * G) * GW[i]);
+        }
+        tot = f32(tot + f32(f32(acc) * half));
+      }
+      out = f32(out + f32(C.dw[k] * tot));
+    }
+    return out;
+  }
+
+  // standardised tokens [A*17] f32 for one orientation -> l [A][2] (divided by the group scale)
+  async encode(xs, A, onProgress, progBase, progSpan) {
+    const { window: WIN, core: CORE, halo: HALO } = this.R;
+    const la = this.R.lookahead;
+    const nW = Math.ceil(A / CORE);
+    const l = new Float32Array(A * 2);
+    const CH = 16;
+    for (let w0 = 0; w0 < nW; w0 += CH) {
+      const nw = Math.min(CH, nW - w0);
+      const xw = new Float32Array(nw * WIN * 17);
+      const valid = new Uint8Array(nw * WIN);
+      const m1 = new Uint8Array(nw * WIN * WIN), m2 = new Uint8Array(nw * WIN * WIN);
+      const tm = new Float64Array(WIN);
+      for (let w = 0; w < nw; w++) {
+        const start = (w0 + w) * CORE - HALO;
+        let cum = 0;
+        for (let p = 0; p < WIN; p++) {
+          const sl = start + p;
+          const ok = sl >= 0 && sl < A;
+          valid[w * WIN + p] = ok ? 1 : 0;
+          if (ok) {
+            xw.set(xs.subarray(sl * 17, sl * 17 + 17), (w * WIN + p) * 17);
+            cum += Math.expm1(xs[sl * 17 + la.gap_dim] * la.scale16 + la.mean16) * 1000;
+          }
+          tm[p] = cum;
+        }
+        const L1 = la.per_layer[0] + la.tol_ms, L2 = la.per_layer[1] + la.tol_ms;
+        for (let i = 0; i < WIN; i++) {
+          const vi = valid[w * WIN + i];
+          const o = (w * WIN + i) * WIN;
+          for (let j = 0; j < WIN; j++) {
+            if (!valid[w * WIN + j]) continue;
+            if (!vi) { m1[o + j] = 1; m2[o + j] = 1; continue; }
+            const dt = tm[j] - tm[i];
+            if (dt <= L1) m1[o + j] = 1;
+            if (dt <= L2) m2[o + j] = 1;
+          }
+        }
+      }
+      const T = this.ort.Tensor;
+      const res = await this.sess.run({
+        xw: new T('float32', xw, [nw, WIN, 17]), valid: new T('bool', valid, [nw, WIN]),
+        m1: new T('bool', m1, [nw, 1, WIN, WIN]), m2: new T('bool', m2, [nw, 1, WIN, WIN]),
+      });
+      const out = res.l.data;
+      for (let w = 0; w < nw; w++) {
+        const a0 = (w0 + w) * CORE;
+        const a1 = Math.min(a0 + CORE, A);
+        for (let a = a0; a < a1; a++) {
+          const p = HALO + (a - a0);
+          const o = (w * WIN + p) * 2;
+          l[a * 2] = f32(out[o] / this.gs[0]);
+          l[a * 2 + 1] = f32(out[o + 1] / this.gs[1]);
+        }
+      }
+      if (onProgress) onProgress(progBase + progSpan * Math.min(1, (w0 + nw) / nW));
+    }
+    return l;
+  }
+
+  // per-action v1 scores for one orientation, added (x0.5) into v1a [P*A]
+  // per-action v1 scores (float32) for profiles p0..p1-1 of one orientation: S[(p-p0)*A + a]
+  secondLayerRange(l, comp, lnH, lnT, od, p0, p1) {
+    const A = comp.length, T = this.terms;
+    const w = v1Windows(od);
+    const W = w.slice(0, 5).map(v => f32(v + 0.5));
+    const LC = this.lnConstants(w);
+    const isLnHead = new Uint8Array(A);
+    for (const h of lnH) isLnHead[h] = 1;
+    const mu = new Float32Array(A), sig = new Float32Array(A), pi = new Float32Array(A);
+    const S = new Float32Array((p1 - p0) * A);
+    for (let p = p0; p < p1; p++) {
+      for (let a = 0; a < A; a++) {
+        const ci = comp[a];
+        const k = p * 2 + ci;
+        const lk = ci ? l[a * 2 + 1] : l[a * 2];
+        let ls = T.ls0[k] + T.ls1[k] * lk;
+        if (ls < -5) ls = -5; else if (ls > 8) ls = 8;
+        sig[a] = f32(Math.exp(ls));
+        mu[a] = f32(T.mu0[k] + T.mu1[k] * lk);
+        pi[a] = f32(1 / (1 + Math.exp(-(T.lg0[k] + T.lg1[k] * lk))));
+      }
+      const row = (p - p0) * A;
+      for (let a = 0; a < A; a++) {
+        if (comp[a] || isLnHead[a]) continue;
+        S[row + a] = f32(this.headScore(mu[a], sig[a], p * 2, W) * f32(1 - pi[a]));
+      }
+      for (let j = 0; j < lnH.length; j++) {
+        const h = lnH[j], t = lnT[j];
+        const sl = this.lnScore(mu[h], sig[h], p * 2, mu[t], sig[t], p * 2 + 1, LC);
+        S[row + h] = f32(f32(f32(1 - pi[h]) * f32(1 - pi[t])) * sl);
+      }
+    }
+    return S;
+  }
+
+  static accumulate(v1a, S, p0, A) {
+    const o = p0 * A;
+    for (let i = 0; i < S.length; i++) v1a[o + i] += 0.5 * S[i];
+  }
+
+  // all profiles of one orientation, locally or split over a helper pool (pool.run(l, comp, lnH, lnT, od, p0, p1) -> S)
+  async secondLayer(l, tk, od, v1a, pool) {
+    const A = tk.nActions, P = this.P;
+    if (!pool || !pool.size) {
+      Reader.accumulate(v1a, this.secondLayerRange(l, tk.comp, tk.lnH, tk.lnT, od, 0, P), 0, A);
+      return;
+    }
+    const k = Math.min(pool.size, P);
+    const parts = [];
+    for (let i = 0; i < k; i++) {
+      const p0 = Math.floor(i * P / k), p1 = Math.floor((i + 1) * P / k);
+      parts.push(pool.run(l, tk.comp, tk.lnH, tk.lnT, od, p0, p1).then(S => ({ S, p0 })));
+    }
+    for (const { S, p0 } of await Promise.all(parts)) Reader.accumulate(v1a, S, p0, A);
+  }
+
+  async perAction(tk, od, onProgress, pool = null) {
+    const A = tk.nActions;
+    const { token_mean: mt, token_scale: st } = this.R;
+    const xs = new Float32Array(A * 17);
+    for (let a = 0; a < A; a++) for (let d = 0; d < 17; d++) xs[a * 17 + d] = f32((tk.tokens[a * 17 + d] - mt[d]) / st[d]);
+    const xm = xs.slice();
+    for (let a = 0; a < A; a++) {
+      const b = a * 17 + 10;
+      const c0 = xm[b], c1 = xm[b + 1];
+      xm[b] = xm[b + 3]; xm[b + 1] = xm[b + 2]; xm[b + 2] = c1; xm[b + 3] = c0;
+    }
+    const v1a = new Float64Array(this.P * A);
+    const prog = onProgress || (() => {});
+    if (pool && pool.size) {
+      // overlap: helpers score orientation 0 while the encoder runs orientation 1
+      const l0 = await this.encode(xs, A, prog, 0, 30);
+      const s0 = this.secondLayer(l0, tk, od, v1a, pool);
+      const l1 = await this.encode(xm, A, prog, 30, 30);
+      await s0; prog(75);
+      await this.secondLayer(l1, tk, od, v1a, pool); prog(95);
+    } else {
+      for (let mirror = 0; mirror < 2; mirror++) {
+        const l = await this.encode(mirror ? xm : xs, A, prog, mirror * 45, 40);
+        await this.secondLayer(l, tk, od, v1a, null);
+        prog(mirror * 45 + 45);
+      }
+    }
+    const acc = new Float64Array(this.P);
+    for (let p = 0; p < this.P; p++) {
+      let s = 0;
+      for (let a = 0; a < A; a++) s += v1a[p * A + a];
+      acc[p] = s / tk.nNotes;
+    }
+    return { acc, v1a };
+  }
+
+  // anchor.theta_star_grid + ps_readout.thetas (rule v1, 96 %)
+  theta(acc) {
+    const grid = this.R.theta_grid, P = grid.length;
+    const z = new Float64Array(P);
+    for (let p = 0; p < P; p++) z[p] = Math.log(Math.min(Math.max(1 - acc[p], 1e-12), 1));
+    for (let p = 1; p < P; p++) if (z[p] > z[p - 1]) z[p] = z[p - 1];
+    const zt = Math.log(1 - this.R.threshold_v1);
+    let t, flag = '';
+    if (!z.every(Number.isFinite)) return { theta: NaN, flag: 'missing' };
+    if (z[0] <= zt) { t = grid[0]; flag = 'censored_low'; }
+    else if (z[P - 1] > zt) { t = grid[P - 1]; flag = 'censored_high'; }
+    else {
+      let k = 0; while (!(z[k] <= zt)) k++;
+      const z0 = z[k - 1], z1 = z[k];
+      t = z0 !== z1 ? grid[k - 1] + (grid[k] - grid[k - 1]) * (z0 - zt) / (z0 - z1) : grid[k];
+    }
+    if (!flag) {
+      const [lo, hi] = this.R.theta_flag_range;
+      if (t < lo) flag = 'extrap_low'; else if (t > hi) flag = 'extrap_high';
+    }
+    return { theta: t, flag };
+  }
+
+  // ps_readout.segment_table (v1 part): 10 s windows, 5 s step, theta* per window on the frozen public-star scale
+  segments(v1a, tk) {
+    const A = tk.nActions, P = this.P, t = tk.times;
+    let t0 = Infinity, t1 = -Infinity;
+    for (let a = 0; a < A; a++) { if (t[a] < t0) t0 = t[a]; if (t[a] > t1) t1 = t[a]; }
+    const wins = [];
+    if (t1 - t0 <= 10000) wins.push([t0, t1, true]);
+    else { let s = t0; while (s < t1 - 10000) { wins.push([s, s + 10000, false]); s += 5000; } wins.push([t1 - 10000, t1, true]); }
+    const sc = this.R.public_star_scale;
+    const out = [];
+    for (const [s, e, closed] of wins) {
+      const acc = new Float64Array(P);
+      let nh = 0;
+      for (let a = 0; a < A; a++) {
+        if (tk.comp[a] || t[a] < s || (closed ? t[a] > e : t[a] >= e)) continue;
+        nh++;
+        for (let p = 0; p < P; p++) acc[p] += v1a[p * A + a];
+      }
+      let star = null;
+      if (nh) { for (let p = 0; p < P; p++) acc[p] /= nh; star = sc.a + sc.b * this.theta(acc).theta; }
+      out.push({ startS: s / 1000, endS: e / 1000, star, nObj: nh, sparse: nh < 8 });
+    }
+    return out;
+  }
+}

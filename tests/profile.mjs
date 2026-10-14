@@ -1,0 +1,22 @@
+// Stage timing for one chart: node tests/profile.mjs <file.osu>
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import * as ort from 'onnxruntime-web';
+import { createEngine } from '../docs/js/engine.js';
+import { loadChart } from '../docs/js/osu.js';
+import { tokensFromNotes } from '../docs/js/tokens.js';
+const docs = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'docs');
+ort.env.wasm.numThreads = 1;
+const eng = await createEngine({ ort, loadBytes: async p => new Uint8Array(fs.readFileSync(path.join(docs, p))), loadJson: async p => JSON.parse(fs.readFileSync(path.join(docs, p), 'utf8')) });
+const text = fs.readFileSync(process.argv[2], 'utf8');
+let t = performance.now();
+const { notes, od } = loadChart(text); const a = performance.now() - t; t = performance.now();
+const tk = tokensFromNotes(notes); const b = performance.now() - t;
+const R = eng.reader; const A = tk.nActions;
+const xs = new Float32Array(A * 17);
+for (let i = 0; i < A * 17; i++) xs[i] = Math.fround((tk.tokens[i] - R.R.token_mean[i % 17]) / R.R.token_scale[i % 17]);
+t = performance.now(); const l = await R.encode(xs, A); const c = performance.now() - t;
+const v1a = new Float64Array(R.P * A);
+t = performance.now(); await R.secondLayer(l, tk, od, v1a, null); const d = performance.now() - t;
+console.log(JSON.stringify({ notes: tk.nNotes, actions: A, ln: tk.lnH.length, parse_ms: a, tokens_ms: b, encode_one_mirror_ms: c, second_layer_one_mirror_ms: d }));

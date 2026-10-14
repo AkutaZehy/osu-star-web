@@ -1,0 +1,14 @@
+{
+  "name": "osu-star-web",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Browser-side osu!mania 4K tree star v1 (P1h) reader",
+  "type": "module",
+  "scripts": {
+    "test": "node tests/compare.mjs"
+  },
+  "dependencies": {
+    "fflate": "0.8.3",
+    "onnxruntime-web": "1.30.0"
+  }
+}
