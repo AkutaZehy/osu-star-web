@@ -4,7 +4,7 @@
 // 规则（研究仓库 docs/dan-estimate-r1-results-2026-10-15.md）：
 //   1. 参照读数按段位顺序做单调化（pool-adjacent-violators，违序的相邻段合并成一档，读数取平均）；
 //   2. 相邻两档读数差 < DAN_MERGE_GAP（重训波动量级）时合并成一档，例如 REFORM 2nd 2.88 / 3rd 2.90 → “2nd–3rd”；
-//   3. 谱面读数落在两档之间：线性插值位置，前三分之一“偏下一档”、后三分之一“偏上一档”、中间“居中”；
+//   3. 谱面读数落在两档之间：线性插值位置，离某档 15% 以内写“≈ 该档”，否则前三分之一“偏下一档”、后三分之一“偏上一档”、中间“居中”；
 //   4. 高于最高档：“高于 Eta（外推）”；低于最低档：“低于 1st”/“LN 6 段以下”。
 
 export const DAN_MERGE_GAP = 0.05;
@@ -12,6 +12,8 @@ export const DAN_MERGE_GAP = 0.05;
 // LN 段位谱最低 0.245；研究仓库 docs/analysis/rice-ln-classification-2026-10-11/README.md §1.2、§4.1）
 export const DAN_LN_FEW = 0.15;
 export const LN_MIN_DAN = 6;
+// 读数离某一档很近（两档间距的 15% 以内）时直接写“≈ 该档”，例如段位谱读它自己显示“≈ LN 9th”
+export const DAN_AT = 0.15;
 
 const REFORM_ORDER = ['1st', '2nd', '3rd', '4th', '5th', '6th', '7th', '8th', '9th', '10th', 'alpha', 'beta', 'gamma', 'delta', 'epsilon', 'zeta', 'eta'];
 const REFORM_SHORT = { alpha: 'Alpha', beta: 'Beta', gamma: 'Gamma', delta: 'Delta', epsilon: 'Epsilon', zeta: 'Zeta', eta: 'Eta' };
@@ -114,6 +116,8 @@ export function danText(loc, { prefix = '', belowText = null } = {}) {
   const L = (t) => prefix + t.label;
   if (loc.kind === 'below') return belowText || `低于 ${L(loc.hi)}`;
   if (loc.kind === 'above') return `高于 ${L(loc.lo)}（外推）`;
+  if (loc.frac <= DAN_AT) return `≈ ${L(loc.lo)}`;
+  if (loc.frac >= 1 - DAN_AT) return `≈ ${L(loc.hi)}`;
   const single = !loc.lo.merged && !loc.hi.merged;
   const span = single ? `${prefix}${loc.lo.label}–${loc.hi.label} 之间` : `${L(loc.lo)} 与 ${L(loc.hi)} 之间`;
   const lean = loc.lean === 'mid' ? '居中' : `偏 ${(loc.lean === 'lo' ? loc.lo : loc.hi).label}`;

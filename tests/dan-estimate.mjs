@@ -63,10 +63,21 @@ test('locate: between with lean thirds, below, above with extrapolated position'
   assert.equal(locateDan(NaN, tiers), null);
 });
 
+test('a reading within 15 % of a tier reads "≈ tier"; a reference chart reads itself as ≈ its own dan', () => {
+  const tiers = danTiers([pt(7, 5.0, '7th'), pt(8, 5.3, '8th'), pt(9, 6.0, '9th')]);
+  assert.equal(danText(locateDan(5.0, tiers)), '≈ 7th');
+  assert.equal(danText(locateDan(5.3, tiers)), '≈ 8th');
+  assert.equal(danText(locateDan(6.0, tiers), { prefix: 'LN ' }), '≈ LN 9th');
+  assert.equal(danText(locateDan(5.04, tiers)), '≈ 7th');
+  const ln = danTiers(danPoints(data, 'ln'));
+  for (const t of ln) assert.equal(danText(locateDan(t.star, ln), { prefix: 'LN ' }), `≈ LN ${t.label}`);
+});
+
 test('merged tiers read "A 与 B 之间"', () => {
   const tiers = danTiers([pt(1, 2.62, '1st'), pt(2, 2.88, '2nd'), pt(3, 2.90, '3rd'), pt(4, 3.60, '4th')]);
-  assert.equal(danText(locateDan(2.85, tiers)), '1st 与 2nd–3rd 之间（偏 2nd–3rd）');
-  assert.equal(danText(locateDan(3.5, tiers)), '2nd–3rd 与 4th 之间（偏 4th）');
+  assert.equal(danText(locateDan(2.83, tiers)), '1st 与 2nd–3rd 之间（偏 2nd–3rd）');
+  assert.equal(danText(locateDan(3.4, tiers)), '2nd–3rd 与 4th 之间（偏 4th）');
+  assert.equal(danText(locateDan(3.5, tiers)), '≈ 4th');
 });
 
 test('danEstimate on the live references: rice and face, LN below 6th, few long notes, unreliable, rates', () => {
