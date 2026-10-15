@@ -6,7 +6,13 @@ import {
 import {
   listOsz, parseOsuHeader, decodeText, skipReason, mergeMeta, displayName,
   unreliableReasons, jackHint, buildCopyText, buildSegmentsSvg, fmtStar, fmtTime, SEG_CAPTION,
+  MOD_SHORT, HT_NOTE, modLabel,
 } from './ui-lib.js';
+
+const RATES = [1, 0.75, 1.5];
+const MOD_KEY = 'osu-star-web.mod';
+// 不随倍速变化的拒绝原因：算一次就够，三档共用
+const RATE_FREE_REJECT = ['not_mania', 'not_4k', 'too_few_notes'];
 
 export const FEEDBACK_URL = 'https://github.com/sky2002/osu-star-web/issues/new';
 
@@ -35,11 +41,24 @@ const state = {
   phase: 'loading', // loading | ready | error
   ver: null, // {version, frozen}
   items: [],
-  current: null,
+  current: null, // { it, rate, job }
   uid: 0,
+  job: 0,
+  mod: loadMod(),
   references: null,
   referencesPhase: 'loading',
 };
+
+function loadMod() {
+  try {
+    const v = Number(localStorage.getItem(MOD_KEY));
+    return RATES.includes(v) ? v : 1;
+  } catch { return 1; }
+}
+
+function saveMod(rate) {
+  try { localStorage.setItem(MOD_KEY, String(rate)); } catch { /* 无痕模式等：不记住也没关系 */ }
+}
 
 async function loadDanReferences() {
   const controller = new AbortController();
@@ -111,48 +130,57 @@ function onWorkerMessage(ev) {
     setStatus('ready', `模型已就绪（加载 ${sec} 秒）· ${m.version}，冻结 ${m.frozen}`);
     pump();
   } else if (m.type === 'error') {
-    if (m.id !== undefined && state.current && state.current.uid === m.id) {
+    if (m.id !== undefined && state.current && state.current.job === m.id) {
       finishCurrent({ ok: false, reason: 'parse_error', message: m.message || '计算出错' });
     } else if (state.phase === 'loading') {
       initFailed(`模型加载失败：${m.message || '未知错误'}。${BROWSER_HINT}`);
     }
   } else if (m.type === 'progress') {
-    const it = state.items.find((x) => x.uid === m.id);
+    const cur = state.current;
+    const it = cur && cur.job === m.id && cur.rate === state.mod ? cur.it : null;
     if (it && it.status === 'running') {
       it.stage = m.stage || '';
       it.pct = Math.max(0, Math.min(100, Number(m.pct) || 0));
       updateProgress(it);
     }
   } else if (m.type === 'result') {
-    if (state.current && state.current.uid === m.id) finishCurrent(m.result);
+    if (state.current && state.current.job === m.id) finishCurrent(m.result);
     else { state.current = null; pump(); }
   }
 }
 
+// 只算当前 Mod 还没有结果的谱；谱面字节留在页面里，换 Mod 时再送一份副本
 function pump() {
   if (state.phase !== 'ready' || state.current) return;
-  const next = state.items.find((x) => x.status === 'queued');
+  const rate = state.mod;
+  const next = state.items.find((x) => x.bytes && !x.failed && !x.results.has(rate));
   if (!next) return;
-  state.current = next;
+  const job = ++state.job;
+  state.current = { it: next, rate, job };
   next.status = 'running';
   next.stage = '开始';
   next.pct = 0;
   renderItem(next);
-  const bytes = next.bytes;
-  next.bytes = null;
+  const bytes = next.bytes.slice();
   state.worker.postMessage(
-    { type: 'score', id: next.uid, bytes, name: next.name, oszHasOsb: next.oszHasOsb },
+    { type: 'score', id: job, bytes, name: next.name, oszHasOsb: next.oszHasOsb, rate },
     [bytes.buffer],
   );
 }
 
 function finishCurrent(result) {
-  const it = state.current;
+  const cur = state.current;
   state.current = null;
-  if (it) {
-    it.status = 'done';
-    it.result = result || { ok: false, reason: 'parse_error', message: '没有收到计算结果' };
-    renderItem(it);
+  if (cur) {
+    const it = cur.it;
+    const res = result || { ok: false, reason: 'parse_error', message: '没有收到计算结果' };
+    if (!res.ok && RATE_FREE_REJECT.includes(res.reason)) for (const r of RATES) it.results.set(r, res);
+    else it.results.set(cur.rate, res);
+    if (cur.rate === state.mod) {
+      it.status = 'done';
+      it.result = res;
+      renderItem(it);
+    }
   }
   pump();
 }
@@ -160,8 +188,31 @@ function finishCurrent(result) {
 function failItem(it, message) {
   it.status = 'done';
   it.bytes = null;
+  it.failed = true;
   it.result = { ok: false, reason: 'parse_error', message };
   renderItem(it);
+}
+
+function setMod(rate) {
+  if (!RATES.includes(rate)) return;
+  state.mod = rate;
+  saveMod(rate);
+  syncModButtons();
+  for (const it of state.items) {
+    if (it.status === 'skipped' || it.failed) continue;
+    const cur = state.current;
+    if (it.results.has(rate)) { it.status = 'done'; it.result = it.results.get(rate); }
+    else if (cur && cur.it === it && cur.rate === rate) { it.status = 'running'; it.result = null; }
+    else { it.status = 'queued'; it.result = null; }
+    renderItem(it);
+  }
+  pump();
+}
+
+function syncModButtons() {
+  for (const b of document.querySelectorAll('#mods [data-rate]')) {
+    b.setAttribute('aria-pressed', String(Number(b.dataset.rate) === state.mod));
+  }
 }
 
 // ---------------------------------------------------------------- 添加文件
@@ -181,7 +232,7 @@ function addNotice(text) {
 
 function addItem({ name, header, bytes, oszHasOsb, skip }) {
   const it = {
-    uid: ++state.uid, name, header, bytes, oszHasOsb: !!oszHasOsb,
+    uid: ++state.uid, name, header, bytes, oszHasOsb: !!oszHasOsb, results: new Map(), failed: false,
     status: skip ? 'skipped' : 'queued', skip, result: null, stage: '', pct: 0, el: h('article', { class: 'card' }),
   };
   state.items.push(it);
@@ -267,7 +318,8 @@ function renderItem(it) {
   } else if (r && r.ok) {
     const reasons = unreliableReasons(r);
     if (reasons.length) el.classList.add('unreliable');
-    side = h('div', { class: 'star' }, '★ ' + fmtStar(r.star));
+    const tag = MOD_SHORT[r.rate || 1];
+    side = h('div', { class: 'star' }, '★ ' + fmtStar(r.star), tag ? h('span', { class: 'mod-tag', text: tag }) : null);
     if (reasons.length) {
       extra.push(h('div', { class: 'warn' },
         h('span', { class: 'tag', text: '不可靠' }),
@@ -275,6 +327,7 @@ function renderItem(it) {
     }
     const jh = jackHint(r);
     if (jh) extra.push(h('div', { class: 'note', text: jh }));
+    if (r.rate === 0.75) extra.push(h('div', { class: 'note', text: HT_NOTE }));
     extra.push(danReferencePanel(r));
     const svg = buildSegmentsSvg(r.segments, r.hardest);
     if (svg) {
@@ -339,6 +392,7 @@ function subline(it, meta) {
   const n = r && r.ok ? r.nNotes : (it.header && it.header.nObjects);
   if (n) bits.push(`物件 ${n}`);
   if (r && r.ok) {
+    if ((r.rate || 1) !== 1) bits.push(modLabel(r.rate));
     if (Number.isFinite(r.durationS)) bits.push(`时长 ${fmtTime(r.durationS)}`);
     if (Number.isFinite(r.od)) bits.push(`OD ${Number(r.od).toFixed(1)}`);
     if (Number.isFinite(r.seconds)) bits.push(`计算 ${r.seconds.toFixed(1)} 秒`);
@@ -414,8 +468,13 @@ function setupUi() {
   window.addEventListener('dragover', (e) => e.preventDefault());
   window.addEventListener('drop', (e) => e.preventDefault());
 
+  for (const b of document.querySelectorAll('#mods [data-rate]')) {
+    b.addEventListener('click', () => setMod(Number(b.dataset.rate)));
+  }
+  syncModButtons();
+
   $('#clear').addEventListener('click', () => {
-    state.items = state.items.filter((x) => x === state.current);
+    state.items = state.items.filter((x) => state.current && x === state.current.it);
     resultsEl().replaceChildren(...state.items.map((x) => x.el));
     if (!state.items.length) $('#results-sec').hidden = true;
   });

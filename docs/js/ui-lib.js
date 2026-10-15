@@ -9,6 +9,13 @@ export const SEG_CAPTION =
 
 const MODE_NAMES = ['std', 'taiko', 'catch', 'mania'];
 
+/** 倍速 → 显示名。只支持这三档。 */
+export const MOD_LABELS = { 1: 'NoMod', 0.75: 'HT（0.75 倍）', 1.5: 'DT（1.5 倍）' };
+export const MOD_SHORT = { 1: '', 0.75: 'HT', 1.5: 'DT' };
+export const HT_NOTE =
+  'HT 读数未经检验：模型没有用 HT 成绩训练或检验，只是把谱面放慢到 0.75 倍后按同一方法计算';
+export function modLabel(rate) { return MOD_LABELS[rate] || `${rate} 倍`; }
+
 export function decodeText(u8) {
   return new TextDecoder('utf-8').decode(u8); // 默认会去掉 BOM
 }
@@ -149,6 +156,7 @@ export function buildCopyText(result, header, fileName, ver, references) {
   lines.push(`md5：${meta.md5 || '无'}`);
   if (result && result.ok) {
     lines.push(`星数：${fmtStar(result.star)}`);
+    lines.push(`Mod：${modLabel(result.rate || 1)}`);
   } else {
     lines.push(`星数：无（${(result && result.message) || '未计算'}）`);
   }
@@ -160,6 +168,7 @@ export function buildCopyText(result, header, fileName, ver, references) {
   }
   const jh = jackHint(result);
   if (jh) lines.push(`提示：${jh}`);
+  if (result && result.ok && result.rate === 0.75) lines.push(`提示：${HT_NOTE}`);
   if (result && result.ok) lines.push(...danReferenceCopyLines(references));
   return lines.join('\n');
 }

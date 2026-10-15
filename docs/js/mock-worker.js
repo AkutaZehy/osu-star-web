@@ -20,6 +20,7 @@ function lastObjectTimeS(text) {
 
 async function score(msg) {
   const { id, bytes, name, oszHasOsb } = msg;
+  const rate = msg.rate || 1;
   const text = decodeText(bytes);
   const h = parseOsuHeader(text);
   const md5 = md5Hex(bytes);
@@ -41,8 +42,8 @@ async function score(msg) {
     result = { ok: false, reason: 'too_few_notes', message: '物件少于 20 个，不计算。', nNotes: h.nObjects, ...meta };
   } else {
     const b = parseInt(md5.slice(0, 8), 16);
-    const star = 1.5 + (b % 7500) / 1000; // 1.5 ~ 9.0
-    const durationS = Math.max(lastObjectTimeS(text), 10);
+    const star = 1.5 + (b % 7500) / 1000 + (rate === 1.5 ? 1.6 : rate === 0.75 ? -1.1 : 0); // 1.5 ~ 9.0 at 1.0x
+    const durationS = Math.max(lastObjectTimeS(text) / rate, 10);
     const nSeg = Math.max(1, Math.ceil(durationS / 10));
     const segments = [];
     let hard = null;
@@ -62,7 +63,7 @@ async function score(msg) {
     if (star > 8.9) flags.outOfRangeReasons.push(`星数 ${star.toFixed(2)} 高于排名谱最高读数约 8.9`);
     if (b % 11 === 0) flags.outOfRangeReasons.push('长条占比超出排名谱的范围');
     result = {
-      ok: true, ...meta, beatmapSetId: h.beatmapSetId,
+      ok: true, rate, ...meta, beatmapSetId: h.beatmapSetId,
       star, reading: star - 4.6, theta: (star - 4.6146) / 1.3714,
       nNotes: h.nObjects, nActions: Math.round(h.nObjects * 1.3), od: 8, durationS,
       seconds: DELAY_MS / 1000, reliable: !(flags.sv || flags.storyboard || flags.outOfRange),

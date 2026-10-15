@@ -14,11 +14,14 @@ const GL_W = [0.027152459411754176, 0.062253523938647456, 0.0951585116824926, 0.
   0.16915651939500265, 0.1495959888165767, 0.12462897125553407, 0.0951585116824926, 0.062253523938647456, 0.027152459411754176];
 const GX = GL_X.map(f32), GW = GL_W.map(f32);
 
-// osu_diff.stable_judgement.hit_windows(od) (NoMod): MAX, 300, 200, 100, 50, earliest
-export function v1Windows(od) {
+// osu_diff.stable_judgement.hit_windows(od, mods): MAX, 300, 200, 100, 50, earliest (integer map-time windows).
+// rate 1.5 = DT bit (x 1.5), 0.75 = HT bit (x 0.75), applied in double before truncation as stable does.
+export const RATES = [1, 0.75, 1.5];
+export function v1Windows(od, rate = 1) {
   if (!Number.isFinite(od) || od < 0 || od > 10) throw new Error('Stable OD must be finite and between 0 and 10');
+  if (!RATES.includes(rate)) throw new Error('rate must be 1, 0.75 or 1.5');
   const diff = f32(10 - f32(od));
-  return [16, ...[34, 67, 97, 121, 158].map(b => Math.trunc(f32(b + f32(3 * diff))))];
+  return [16, ...[34, 67, 97, 121, 158].map(b => f32(b + f32(3 * diff)))].map(v => Math.trunc(v * rate));
 }
 
 export class Reader {
@@ -171,11 +174,11 @@ export class Reader {
     return l;
   }
 
-  // per-action v1 scores for one orientation, added (x0.5) into v1a [P*A]
-  // per-action v1 scores (float32) for profiles p0..p1-1 of one orientation: S[(p-p0)*A + a]
-  secondLayerRange(l, comp, lnH, lnT, od, p0, p1) {
+  // per-action v1 scores (float32) for profiles p0..p1-1 of one orientation: S[(p-p0)*A + a].
+  // rate != 1 (analysis/web-rate-r1, = dt-crowd r1 ps_rate): scored in map time, mu and sigma x rate against the mod windows
+  secondLayerRange(l, comp, lnH, lnT, od, p0, p1, rate = 1) {
     const A = comp.length, T = this.terms;
-    const w = v1Windows(od);
+    const w = v1Windows(od, rate);
     const W = w.slice(0, 5).map(v => f32(v + 0.5));
     const LC = this.lnConstants(w);
     const isLnHead = new Uint8Array(A);
@@ -191,6 +194,7 @@ export class Reader {
         if (ls < -5) ls = -5; else if (ls > 8) ls = 8;
         sig[a] = f32(Math.exp(ls));
         mu[a] = f32(T.mu0[k] + T.mu1[k] * lk);
+        if (rate !== 1) { sig[a] = f32(sig[a] * rate); mu[a] = f32(mu[a] * rate); }
         pi[a] = f32(1 / (1 + Math.exp(-(T.lg0[k] + T.lg1[k] * lk))));
       }
       const row = (p - p0) * A;
@@ -212,23 +216,23 @@ export class Reader {
     for (let i = 0; i < S.length; i++) v1a[o + i] += 0.5 * S[i];
   }
 
-  // all profiles of one orientation, locally or split over a helper pool (pool.run(l, comp, lnH, lnT, od, p0, p1) -> S)
-  async secondLayer(l, tk, od, v1a, pool) {
+  // all profiles of one orientation, locally or split over a helper pool (pool.run(l, comp, lnH, lnT, od, p0, p1, rate) -> S)
+  async secondLayer(l, tk, od, v1a, pool, rate = 1) {
     const A = tk.nActions, P = this.P;
     if (!pool || !pool.size) {
-      Reader.accumulate(v1a, this.secondLayerRange(l, tk.comp, tk.lnH, tk.lnT, od, 0, P), 0, A);
+      Reader.accumulate(v1a, this.secondLayerRange(l, tk.comp, tk.lnH, tk.lnT, od, 0, P, rate), 0, A);
       return;
     }
     const k = Math.min(pool.size, P);
     const parts = [];
     for (let i = 0; i < k; i++) {
       const p0 = Math.floor(i * P / k), p1 = Math.floor((i + 1) * P / k);
-      parts.push(pool.run(l, tk.comp, tk.lnH, tk.lnT, od, p0, p1).then(S => ({ S, p0 })));
+      parts.push(pool.run(l, tk.comp, tk.lnH, tk.lnT, od, p0, p1, rate).then(S => ({ S, p0 })));
     }
     for (const { S, p0 } of await Promise.all(parts)) Reader.accumulate(v1a, S, p0, A);
   }
 
-  async perAction(tk, od, onProgress, pool = null) {
+  async perAction(tk, od, onProgress, pool = null, rate = 1) {
     const A = tk.nActions;
     const { token_mean: mt, token_scale: st } = this.R;
     const xs = new Float32Array(A * 17);
@@ -244,14 +248,14 @@ export class Reader {
     if (pool && pool.size) {
       // overlap: helpers score orientation 0 while the encoder runs orientation 1
       const l0 = await this.encode(xs, A, prog, 0, 30);
-      const s0 = this.secondLayer(l0, tk, od, v1a, pool);
+      const s0 = this.secondLayer(l0, tk, od, v1a, pool, rate);
       const l1 = await this.encode(xm, A, prog, 30, 30);
       await s0; prog(75);
-      await this.secondLayer(l1, tk, od, v1a, pool); prog(95);
+      await this.secondLayer(l1, tk, od, v1a, pool, rate); prog(95);
     } else {
       for (let mirror = 0; mirror < 2; mirror++) {
         const l = await this.encode(mirror ? xm : xs, A, prog, mirror * 45, 40);
-        await this.secondLayer(l, tk, od, v1a, null);
+        await this.secondLayer(l, tk, od, v1a, null, rate);
         prog(mirror * 45 + 45);
       }
     }

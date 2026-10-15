@@ -23,6 +23,13 @@
     <span class="dot" aria-hidden="true"></span><span id="status-text">正在加载模型（首次约 15 MB）…</span>
   </div>
 
+  <div id="mods" class="mods" role="group" aria-label="Mod（倍速）">
+    <span class="mods-label">Mod</span>
+    <button type="button" class="mod" data-rate="1" aria-pressed="true">NoMod</button>
+    <button type="button" class="mod" data-rate="0.75" aria-pressed="false">HT <small>0.75×</small></button>
+    <button type="button" class="mod" data-rate="1.5" aria-pressed="false">DT <small>1.5×</small></button>
+  </div>
+
   <label id="drop" class="drop" for="file-input">
     <input id="file-input" type="file" accept=".osu,.osz" multiple hidden>
     <span class="drop-title">把 .osu 或 .osz 文件拖到这里</span>
@@ -50,7 +57,16 @@
     </details>
     <details>
       <summary>这不是官方星数</summary>
-      <p>这不是 osu! 官方星数，也不会和它一一对应。只给 1.0 倍速的读数，不计算 DT / HT 等 mod。</p>
+      <p>这不是 osu! 官方星数，也不会和它一一对应。除 HT / DT 外，不计算其他 mod（HR、EZ、HD 等）。</p>
+    </details>
+    <details>
+      <summary>HT / DT</summary>
+      <p>在上方选 Mod 后，所有谱面会按这个倍速重新计算（算过的会记住，来回切换不用重算）。DT/NC 固定 1.5 倍，HT 固定 0.75 倍；判定窗口按 stable 的 DT / HT 规则换算，OD 仍用谱面文件里的值。</p>
+      <ul>
+        <li>DT：模型训练时用过官方成绩库里的 DT 成绩，DT 读数经过和 NoMod 同类的检验。</li>
+        <li>HT：官方成绩库里的 HT 成绩不可靠（多半是练习或试玩），没有用来训练和检验。HT 读数只是“把谱放慢到 0.75 倍”后按同一方法算出来的，仅供参考。</li>
+        <li>分段曲线的时间轴是变速后的实际时间。附近段位参考谱仍是各段位谱的 NoMod 读数。</li>
+      </ul>
     </details>
     <details>
       <summary>什么谱会被拒绝</summary>

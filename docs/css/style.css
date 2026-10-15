@@ -87,6 +87,22 @@ h2 { font-size: 1.1rem; margin: 0; }
 .btn.small { padding: 4px 12px; min-height: 34px; font-size: 0.9rem; }
 .btn:focus-visible, a:focus-visible, summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
+.mods { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-bottom: 12px; }
+.mods-label { color: var(--muted); font-size: 0.9rem; margin-right: 2px; }
+.mod {
+  font: inherit; cursor: pointer; border: 1px solid var(--line); background: var(--panel); color: var(--text);
+  padding: 4px 14px; border-radius: 999px; min-height: 34px; font-size: 0.92rem;
+}
+.mod small { color: var(--muted); font-size: 0.78rem; }
+.mod:hover { border-color: var(--accent); }
+.mod[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: var(--accent-text); font-weight: 600; }
+.mod[aria-pressed="true"] small { color: inherit; opacity: .85; }
+.mod:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.card .star .mod-tag {
+  display: block; width: max-content; margin-top: 2px; padding: 0 7px; border-radius: 4px;
+  background: var(--note-bg); color: var(--text); font-size: 0.8rem; font-weight: 700; line-height: 1.6;
+}
+
 .results-sec { margin-top: 24px; }
 .results-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
 .group { margin: 16px 0 6px; font-size: 0.92rem; }

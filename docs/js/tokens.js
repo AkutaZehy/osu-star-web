@@ -1,20 +1,20 @@
 // Action tokens, ported from tools/pilot_v3_w3_data.chart_inputs, tools/chart_star_sequence.sequence_from_notes,
 // tools/chart_star_chord_order.sequence_from_notes_sym (tie='average') and dan-readout dr_prep.pairing (rate 1.0).
 // Output: tokens [n,17] float32 (raw, before standardisation) in the sym chord order, times (ms), comp (0 head, 1 tail),
-// LN head / tail action indices (same held order), number of notes.
+// LN head / tail action indices (same held order), number of notes. rate: 0.75 / 1.5 divide every time by the rate (real ms).
 import { rint, round6, ssLeft, ssRight, f32 } from './pyutil.js';
 
 const D = 18;
 
-export function tokensFromNotes(notesIn) {
+export function tokensFromNotes(notesIn, rate = 1) {
   const N = notesIn.length;
-  // chart_inputs: notes[:, :2] = rint(round(notes[:, :2] - min start, 6) / rate * 1e6) / 1e6   (rate 1)
+  // chart_inputs: notes[:, :2] = rint(round(notes[:, :2] - min start, 6) / rate * 1e6) / 1e6
   let mn = Infinity;
   for (const n of notesIn) if (n[0] < mn) mn = n[0];
   const s = new Float64Array(N), e = new Float64Array(N), col = new Int32Array(N), hold = new Int32Array(N);
   for (let i = 0; i < N; i++) {
-    s[i] = rint(round6(notesIn[i][0] - mn) * 1e6) / 1e6;
-    e[i] = rint(round6(notesIn[i][1] - mn) * 1e6) / 1e6;
+    s[i] = rint(round6(notesIn[i][0] - mn) / rate * 1e6) / 1e6;
+    e[i] = rint(round6(notesIn[i][1] - mn) / rate * 1e6) / 1e6;
     col[i] = notesIn[i][2]; hold[i] = notesIn[i][3];
   }
   const held = [];
