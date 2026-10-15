@@ -8,6 +8,10 @@ import {
   unreliableReasons, jackHint, buildCopyText, buildSegmentsSvg, fmtStar, fmtTime, SEG_CAPTION,
   MOD_SHORT, HT_NOTE, modLabel,
 } from './ui-lib.js';
+import {
+  validateLadder, ladder, parseAcc, reverseNote, reverseCaption, lnNote, fmtLadderStar, ladderCopyLine,
+  LADDER_TITLE, LADDER_CAPTION, LADDER_LABEL, LADDER_UNRELIABLE_NOTE,
+} from './acc-ladder.js';
 
 const RATES = [1, 0.75, 1.5];
 const MOD_KEY = 'osu-star-web.mod';
@@ -47,6 +51,8 @@ const state = {
   mod: loadMod(),
   references: null,
   referencesPhase: 'loading',
+  ladder: null,
+  ladderPhase: 'loading',
 };
 
 function loadMod() {
@@ -72,6 +78,21 @@ async function loadDanReferences() {
     state.referencesPhase = 'error';
   } finally {
     clearTimeout(timeout);
+    for (const item of state.items) {
+      if (item.status === 'done' && item.result?.ok) renderItem(item);
+    }
+  }
+}
+
+async function loadLadder() {
+  try {
+    const response = await fetch(new URL('../model/acc-ladder.json', import.meta.url));
+    if (!response.ok) throw new Error('达成水平参数加载失败');
+    state.ladder = validateLadder(await response.json());
+    state.ladderPhase = 'ready';
+  } catch {
+    state.ladderPhase = 'error';
+  } finally {
     for (const item of state.items) {
       if (item.status === 'done' && item.result?.ok) renderItem(item);
     }
@@ -328,6 +349,7 @@ function renderItem(it) {
     const jh = jackHint(r);
     if (jh) extra.push(h('div', { class: 'note', text: jh }));
     if (r.rate === 0.75) extra.push(h('div', { class: 'note', text: HT_NOTE }));
+    extra.push(ladderPanel(r, it));
     extra.push(danReferencePanel(r));
     const svg = buildSegmentsSvg(r.segments, r.hardest);
     if (svg) {
@@ -385,6 +407,66 @@ function danReferencePanel(result) {
   return panel;
 }
 
+// 达成水平：四条预设线 + 自定义 acc（每张卡各自记住输入值）；只依赖总星数，不需要重新计算
+function ladderPanel(result, it) {
+  const panel = h('section', { class: 'ladder', 'aria-label': LADDER_TITLE }, h('h3', { text: LADDER_TITLE }));
+  const P = state.ladder;
+  if (!P) {
+    panel.append(h('p', { class: 'muted dan-caption', text: state.ladderPhase === 'loading' ? '正在加载达成水平参数…' : '达成水平暂不可用；星数计算不受影响。' }));
+    return panel;
+  }
+  const rate = result.rate || 1;
+  const tag = (row) => {
+    const L = LADDER_LABEL[row.label];
+    return h('span', { class: 'ladder-tag ' + row.label, title: L.title, text: L.text });
+  };
+  const tbody = h('tbody');
+  for (const t of P.presets) {
+    const row = ladder(P, result.star, t, rate);
+    tbody.append(h('tr', t === 96 ? { class: 'is96' } : null,
+      h('td', { text: `${t}%` }), h('td', { class: 'ladder-star', text: fmtLadderStar(row) }), h('td', null, tag(row))));
+  }
+  const input = h('input', {
+    type: 'number', min: String(P.input_range[0]), max: String(P.input_range[1]), step: '0.1', inputmode: 'decimal',
+    value: String(it.ladderT ?? 96), 'aria-label': '自定义 acc（%）',
+  });
+  const outStar = h('td', { class: 'ladder-star' });
+  const outTag = h('td');
+  const outNote = h('p', { class: 'ladder-rev muted' });
+  const update = () => {
+    const t = parseAcc(P, input.value);
+    outTag.replaceChildren();
+    outNote.className = 'ladder-rev muted';
+    if (t === null) {
+      outStar.textContent = `请输入 ${P.input_range[0]}–${P.input_range[1]}`;
+      outNote.textContent = '';
+      return;
+    }
+    it.ladderT = t;
+    const row = ladder(P, result.star, t, rate);
+    outStar.textContent = fmtLadderStar(row);
+    outTag.append(tag(row));
+    const rn = reverseNote(P, t);
+    outNote.textContent = rn ? rn.text : '';
+    if (rn) outNote.className = 'ladder-rev ' + (rn.level === 'bad' ? 'dan-caution' : 'muted');
+  };
+  input.addEventListener('input', update);
+  tbody.append(h('tr', { class: 'custom' }, h('td', null, input, '%'), outStar, outTag));
+  update();
+  panel.append(
+    h('p', { class: 'muted dan-caption', text: LADDER_CAPTION }),
+    h('table', { class: 'ladder-tab' },
+      h('thead', null, h('tr', null, h('th', { text: 'acc' }), h('th', { text: '需要的水平' }), h('th', { text: '依据' }))),
+      tbody),
+    outNote,
+    h('p', { class: 'muted dan-caption', text: reverseCaption(P) }),
+  );
+  if (!result.reliable) panel.append(h('p', { class: 'dan-caution', text: LADDER_UNRELIABLE_NOTE }));
+  const ln = lnNote(result);
+  if (ln) panel.append(h('p', { class: 'dan-caution', text: ln }));
+  return panel;
+}
+
 function subline(it, meta) {
   const r = it.result;
   const bits = [];
@@ -405,7 +487,7 @@ function copyRow(it) {
   const row = h('div', { class: 'actions' }, btn);
   btn.addEventListener('click', async () => {
     const references = selectDanReferences(it.result, referencesForModel(state.references, state.ver));
-    const text = buildCopyText(it.result, it.header, it.name, state.ver, references);
+    const text = buildCopyText(it.result, it.header, it.name, state.ver, references, ladderCopyLine(state.ladder, it.result));
     const ok = await copyText(text);
     row.querySelector('textarea')?.remove();
     if (ok) {
@@ -483,3 +565,4 @@ function setupUi() {
 setupUi();
 startWorker();
 loadDanReferences();
+loadLadder();

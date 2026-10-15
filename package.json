@@ -6,7 +6,8 @@
   "type": "module",
   "scripts": {
     "test": "node tests/compare.mjs",
-    "test:references": "node tests/dan-reference.mjs"
+    "test:references": "node tests/dan-reference.mjs",
+    "test:ladder": "node --test tests/acc-ladder.mjs"
   },
   "dependencies": {
     "fflate": "0.8.3",

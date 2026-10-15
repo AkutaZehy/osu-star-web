@@ -56,7 +56,7 @@ async function handle(m) {
     } catch (e) {
       result = { ok: false, reason: 'parse_error', message: '计算出错：' + String(e && e.message || e) };
     }
-    if (result.ok) { delete result.features; delete result.acc; }   // keep the message small; the page does not show them
+    if (result.ok) { result.lnFrac = result.features.ln_frac; delete result.features; delete result.acc; }   // keep the message small; the page only needs the LN share
     self.postMessage({ type: 'result', id, result });
   }
 }

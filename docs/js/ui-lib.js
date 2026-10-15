@@ -144,7 +144,7 @@ export function jackHint(result) {
 }
 
 /** 「复制读数信息」的多行文本。ver 为 ready 消息的 {version, frozen}。 */
-export function buildCopyText(result, header, fileName, ver, references) {
+export function buildCopyText(result, header, fileName, ver, references, ladderLine = null) {
   const meta = mergeMeta(header, result);
   const verText = ver && ver.version
     ? `${ver.version}（冻结日期 ${ver.frozen || '未知'}）` : '未知';
@@ -169,6 +169,7 @@ export function buildCopyText(result, header, fileName, ver, references) {
   const jh = jackHint(result);
   if (jh) lines.push(`提示：${jh}`);
   if (result && result.ok && result.rate === 0.75) lines.push(`提示：${HT_NOTE}`);
+  if (result && result.ok && ladderLine) lines.push(ladderLine);
   if (result && result.ok) lines.push(...danReferenceCopyLines(references));
   return lines.join('\n');
 }

@@ -142,6 +142,21 @@ h2 { font-size: 1.1rem; margin: 0; }
 .dan-empty { margin: 0; font-size: 0.84rem; }
 .dan-caution { color: var(--warn-text); font-size: 0.8rem; margin: 6px 0 0; }
 
+.ladder { margin-top: 12px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 8px; }
+.ladder h3 { margin: 0; font-size: 0.95rem; }
+.ladder-tab { border-collapse: collapse; margin-top: 8px; font-size: 0.86rem; font-variant-numeric: tabular-nums; }
+.ladder-tab th { text-align: left; font-weight: 600; color: var(--muted); font-size: 0.78rem; padding: 2px 14px 4px 0; }
+.ladder-tab td { padding: 3px 14px 3px 0; vertical-align: middle; }
+.ladder-tab tr.is96 td { font-weight: 700; }
+.ladder-tab tr.custom td { border-top: 1px solid var(--line); padding-top: 6px; }
+.ladder-tab input { width: 5.2em; font: inherit; padding: 2px 4px; border: 1px solid var(--line); border-radius: 4px; background: var(--bg); color: var(--text); margin-right: 2px; }
+.ladder-star { color: var(--star); white-space: nowrap; }
+.ladder-tag { display: inline-block; padding: 0 6px; border-radius: 4px; font-size: 0.75rem; line-height: 1.6; cursor: help; }
+.ladder-tag.observed { background: var(--note-bg); color: var(--text); }
+.ladder-tag.extrap { background: var(--warn-bg); color: var(--warn-text); }
+.ladder-rev { margin: 4px 0 0; font-size: 0.8rem; min-height: 0; }
+.ladder-rev:empty { display: none; }
+
 .seg { margin-top: 10px; }
 .seg-svg { max-width: 420px; }
 .spark { width: 100%; height: auto; display: block; }
