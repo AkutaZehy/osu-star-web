@@ -12,7 +12,8 @@ const catalog = validateDanReferences(JSON.parse(fs.readFileSync(new URL('../doc
 const fixtures = JSON.parse(fs.readFileSync(new URL('./fixtures/reference.json', import.meta.url), 'utf8')).charts;
 const itemFixtures = JSON.parse(fs.readFileSync(new URL('./fixtures/reference-rice-ln-od.json', import.meta.url), 'utf8')).charts;
 const model = { version: VERSION, frozen: FROZEN };
-const result = (star, reliable = true) => ({ ok: true, star, reliable });
+// v2：整谱 97% ScoreV2 读数（LN 组用），默认比总星数高 0.6
+const result = (star, reliable = true, v2 = Number.isFinite(star) ? star + 0.6 : star) => ({ ok: true, star, reliable, v2: { star: v2 } });
 const identifiers = (group) => group.matches.map((entry) => entry.id);
 const expectedHashes = {
   'ln-14': 'c9153781895ee7a43cf6e9046ee75ace49a989f012e9f695f107fb5769ca4431',
@@ -84,12 +85,12 @@ test('REFORM 6th uses the canonical 1st Pack variant once', () => {
   assert.notEqual(entries[0].star, 4.676470452452296);
 });
 
-test('6.70 shows Beta/Gamma and LN 12/13 with the existing model stars', () => {
+test('6.70 (97% V2 7.30) shows Beta/Gamma and LN 12/13 on their 97% V2 readings', () => {
   const view = selectDanReferences(result(6.70), catalog);
   assert.deepEqual(identifiers(view.groups[0]), ['reform-beta', 'reform-gamma']);
   assert.deepEqual(view.groups[0].matches.map((entry) => entry.star.toFixed(2)), ['6.41', '7.00']);
   assert.deepEqual(identifiers(view.groups[1]), ['ln-12', 'ln-13']);
-  assert.deepEqual(view.groups[1].matches.map((entry) => entry.star.toFixed(2)), ['6.50', '6.88']);
+  assert.deepEqual(view.groups[1].matches.map((entry) => entry.star.toFixed(2)), ['7.07', '7.44']);
 });
 
 test('the 0.5-star boundary is included and farther readings are excluded', () => {
@@ -104,7 +105,8 @@ test('chooses at most two closest readings per group and shows them in star orde
   for (const star of [1.5, 2.9, 4.5, 6.7, 7.3, 9.8]) {
     for (const group of selectDanReferences(result(star), catalog).groups) {
       assert.ok(group.matches.length <= 2);
-      assert.ok(group.matches.every((entry) => Math.abs(entry.star - star) <= 0.5));
+      const reading = group.id === 'ln' ? star + 0.6 : star;
+      assert.ok(group.matches.every((entry) => Math.abs(entry.star - reading) <= 0.5));
       assert.deepEqual(group.matches.map((entry) => entry.star), group.matches.map((entry) => entry.star).sort((first, second) => first - second));
     }
   }
@@ -116,11 +118,13 @@ test('low and high LN readings leave the group empty when no course is near', ()
   assert.ok(danReferenceCopyLines(selectDanReferences(result(8.1), catalog)).some((line) => line.includes('LN Dan Courses v2：暂无接近的参考谱')));
 });
 
-test('LN inversions follow model stars instead of numeric dan order', () => {
-  const view = selectDanReferences(result(4.4), catalog);
-  assert.deepEqual(identifiers(view.groups[1]), ['ln-3', 'ln-2']);
-  assert.match(view.groups[1].note, /96% ScoreV1/u);
-  assert.match(view.groups[1].note, /倒挂/u);
+test('LN list uses 97% V2 readings from 6th up, and is empty without a V2 reading', () => {
+  const view = selectDanReferences(result(4.8, true, 5.4), catalog);
+  assert.deepEqual(identifiers(view.groups[1]), ['ln-6']);   // LN 5th (V2 5.42) is closer but not listed
+  assert.match(view.groups[1].note, /97% ScoreV2/u);
+  assert.equal(selectDanReferences(result(3.0, true, 3.9), catalog).groups[1].matches.length, 0);
+  assert.equal(selectDanReferences({ ok: true, star: 6.7, reliable: true }, catalog).groups[1].matches.length, 0);
+  assert.deepEqual(identifiers(selectDanReferences({ ok: true, star: 6.7, reliable: true }, catalog).groups[0]), ['reform-beta', 'reform-gamma']);
 });
 
 test('invalid readings and unsuccessful results do not produce references', () => {
@@ -171,7 +175,7 @@ test('feedback copy includes only the displayed nearby groups for successful res
   const score = result(6.7);
   const text = buildCopyText(score, {}, 'chart.osu', model, selectDanReferences(score, catalog));
   assert.match(text, /REFORM Beta ★ 6\.41；REFORM Gamma ★ 7\.00/u);
-  assert.match(text, /LN 12th Dan - Yuugure ★ 6\.50；LN 13th Dan - Yoru ★ 6\.88/u);
+  assert.match(text, /LN 12th Dan - Yuugure ★ 7\.07；LN 13th Dan - Yoru ★ 7\.44/u);
   assert.doesNotMatch(text, /REFORM Alpha/u);
   assert.match(text, /不代表通过能力/u);
   for (const rejected of [null, { ok: false, message: '不是 4K' }]) {
