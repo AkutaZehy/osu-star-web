@@ -135,6 +135,13 @@ h2 { font-size: 1.1rem; margin: 0; }
 .spark .pt { fill: var(--accent); }
 .spark .pt.sparse { fill: var(--panel); stroke: var(--muted); stroke-width: 1; }
 .spark .hl { fill: var(--hl); }
+.spark .hit { fill: transparent; pointer-events: all; }
+.spark .tip { visibility: hidden; pointer-events: none; }
+.spark .col:hover .tip { visibility: visible; }
+.spark .guide { stroke: var(--muted); stroke-width: 0.75; stroke-dasharray: 2 2; }
+.spark .pt-on { fill: var(--accent); stroke: var(--panel); stroke-width: 1; }
+.spark .tip-bg { fill: var(--panel); stroke: var(--line); stroke-width: 0.75; }
+.spark .tip-t { fill: var(--text); font-size: 9px; font-variant-numeric: tabular-nums; }
 .seg-hard { font-size: 0.82rem; }
 .seg-cap { font-size: 0.8rem; }
 

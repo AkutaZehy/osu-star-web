@@ -199,12 +199,31 @@ export function buildSegmentsSvg(segments, hardest) {
     pen = true;
   }
   if (d) svg += `<path class="line" d="${d.trim()}"/>`;
+  const pts = [];
   for (const s of segments) {
     if (!Number.isFinite(s.star)) continue;
     const x = X((s.startS + s.endS) / 2), y = Y(s.star);
-    const tip = `${fmtTime(s.startS)}–${fmtTime(s.endS)}　★ ${fmtStar(s.star)}${s.sparse ? '（物件很少）' : ''}`;
-    svg += `<circle class="${s.sparse ? 'pt sparse' : 'pt'}" cx="${f(x)}" cy="${f(y)}" r="${s.sparse ? 2.2 : 1.6}"><title>${tip}</title></circle>`;
+    pts.push({ s, x, y });
+    svg += `<circle class="${s.sparse ? 'pt sparse' : 'pt'}" cx="${f(x)}" cy="${f(y)}" r="${s.sparse ? 2.2 : 1.6}"/>`;
   }
+  // 悬停列：每个点占据它与左右相邻点中点之间的整列高度，鼠标在点的上方或下方都会显示该点数值（纯 CSS :hover）。
+  const top = T, bot = H - B;
+  pts.forEach((p, i) => {
+    const x0 = i ? (pts[i - 1].x + p.x) / 2 : L;
+    const x1 = i < pts.length - 1 ? (p.x + pts[i + 1].x) / 2 : W - R;
+    const tip = `${fmtTime(p.s.startS)}–${fmtTime(p.s.endS)}  ★ ${fmtStar(p.s.star)}${p.s.sparse ? '（物件很少）' : ''}`;
+    // 9px 字体的粗略宽度：中文约 9px，其余约 4.4px
+    let tw = 0;
+    for (const ch of tip) tw += ch.codePointAt(0) >= 0x3000 ? 9 : 4.4;
+    const bw = tw + 8, bh = 13;
+    const bx = Math.min(Math.max(p.x - bw / 2, L), W - R - bw);
+    const by = p.y - bh - 5 >= 0 ? p.y - bh - 5 : p.y + 5;
+    svg += `<g class="col"><rect class="hit" x="${f(x0)}" y="${top}" width="${f(Math.max(x1 - x0, 1))}" height="${bot - top}"/>`
+      + `<g class="tip"><line class="guide" x1="${f(p.x)}" y1="${top}" x2="${f(p.x)}" y2="${bot}"/>`
+      + `<circle class="pt-on" cx="${f(p.x)}" cy="${f(p.y)}" r="3"/>`
+      + `<rect class="tip-bg" x="${f(bx)}" y="${f(by)}" width="${f(bw)}" height="${bh}" rx="3"/>`
+      + `<text class="tip-t" x="${f(bx + 4)}" y="${f(by + 9.5)}">${tip}</text></g></g>`;
+  });
   svg += '</svg>';
   return svg;
 }
