@@ -5,6 +5,9 @@
 import { f32 } from './pyutil.js';
 
 const V1_W = [1, 1, 2 / 3, 1 / 3, 1 / 6];
+const V2_W = [1, 300 / 305, 200 / 305, 100 / 305, 50 / 305];
+// osu_diff.stable_scorev2.WINDOW_RANGES: (OD 0, OD 5, OD 10) per window MAX, 300, 200, 100, 50, earliest
+const V2_RANGES = [[22.4, 19.4, 13.9], [64, 49, 34], [97, 82, 67], [127, 112, 97], [151, 136, 121], [188, 173, 158]];
 const GL_X = [-0.9894009349916499, -0.9445750230732326, -0.8656312023878318, -0.755404408355003, -0.6178762444026438,
   -0.45801677765722737, -0.2816035507792589, -0.09501250983763744, 0.09501250983763744, 0.2816035507792589,
   0.45801677765722737, 0.6178762444026438, 0.755404408355003, 0.8656312023878318, 0.9445750230732326, 0.9894009349916499];
@@ -24,6 +27,18 @@ export function v1Windows(od, rate = 1) {
   return [16, ...[34, 67, 97, 121, 158].map(b => f32(b + f32(3 * diff)))].map(v => Math.trunc(v * rate));
 }
 
+// osu_diff.stable_scorev2.hit_windows(od, SCORE_V2 | mod bit): float32 OD, double arithmetic, the earliest window unscaled
+export function v2Windows(od, rate = 1) {
+  if (!Number.isFinite(od) || od < 0 || od > 10) throw new Error('Stable OD must be finite and between 0 and 10');
+  if (!RATES.includes(rate)) throw new Error('rate must be 1, 0.75 or 1.5');
+  const d = f32(od);
+  return V2_RANGES.map(([lo, mid, hi], i) => {
+    let v = d > 5 ? mid + (hi - mid) * (d - 5) / 5 : d < 5 ? mid - (mid - lo) * (5 - d) / 5 : mid;
+    if (i < 5) v *= rate;
+    return Math.trunc(v);
+  });
+}
+
 export class Reader {
   constructor(R, table, session, ort) {
     this.R = R; this.tab = table; this.sess = session; this.ort = ort;
@@ -34,6 +49,7 @@ export class Reader {
     this.terms = {};
     for (const k of ['ls0', 'ls1', 'mu0', 'mu1', 'lg0', 'lg1']) this.terms[k] = Float64Array.from(R.terms[k].flat());
     this.dw = [0, f32(V1_W[1] - V1_W[2]), f32(V1_W[2] - V1_W[3]), f32(V1_W[3] - V1_W[4]), f32(V1_W[4])];
+    this.dw2 = V2_W.map((v, g) => f32(g < 4 ? v - V2_W[g + 1] : v));
     this.lnSpecs = [[1.1, 2.2, V1_W[1] - V1_W[2]], [1, 2, V1_W[2] - V1_W[3]], [1, 2, V1_W[3] - V1_W[4]]];
   }
 
@@ -62,6 +78,57 @@ export class Reader {
     let s = 0;
     for (let g = 1; g < 5; g++) s = f32(s + f32(this.dw[g] * this.pint(-W[g], W[g], mu, sig, q)));
     return s;
+  }
+
+  headScoreV2(mu, sig, q, W) {   // rules.head_score with V2_W (the MAX window counts)
+    let s = 0;
+    for (let g = 0; g < 5; g++) s = f32(s + f32(this.dw2[g] * this.pint(-W[g], W[g], mu, sig, q)));
+    return s;
+  }
+
+  // rules.v2_tail_score constants (integer V2 windows w[6])
+  v2TailConstants(w) {
+    const eps = f32(1e-6);
+    const Tg = w.slice(0, 5).map(x => f32(Math.floor(f32(f32(1.5 * x) + eps)) + 0.5));
+    return { Tg, w4e: f32(w[4] + 0.5), L3: f32(Math.ceil(f32(f32(1.5 * w[3]) - eps)) - 0.5), v4: f32(V2_W[4]) };
+  }
+
+  v2Tail(mu, sig, q, C) {   // rules.v2_tail_score -> [score, score if the head was missed]
+    let s = 0;
+    for (let g = 0; g < 5; g++) {
+      s = f32(s + f32(this.dw2[g] * this.pint(-Math.min(C.Tg[g], C.w4e), Math.min(C.Tg[g], C.L3), mu, sig, q)));
+    }
+    s = f32(s + f32(C.v4 * this.pint(-C.Tg[4], -C.w4e, mu, sig, q)));
+    return [s, f32(C.v4 * this.pint(-C.Tg[4], C.L3, mu, sig, q))];
+  }
+
+  // mu, sigma, miss probability of action a for profile p (same arithmetic as secondLayerRange)
+  msp(l, comp, a, p, rate) {
+    const T = this.terms, ci = comp[a], k = p * 2 + ci;
+    const lk = ci ? l[a * 2 + 1] : l[a * 2];
+    let ls = T.ls0[k] + T.ls1[k] * lk;
+    if (ls < -5) ls = -5; else if (ls > 8) ls = 8;
+    let sig = f32(Math.exp(ls)), mu = f32(T.mu0[k] + T.mu1[k] * lk);
+    if (rate !== 1) { sig = f32(sig * rate); mu = f32(mu * rate); }
+    return [mu, sig, f32(1 / (1 + Math.exp(-(T.lg0[k] + T.lg1[k] * lk))))];
+  }
+
+  // ScoreV2 scores of the long-note heads and tails of one orientation, added (x 0.5) into V[p * 2L + j] (j < L heads, then
+  // tails): ps_engine.per_action v2 restricted to the LN actions
+  lnV2Accumulate(l, comp, lnH, lnT, od, rate, V) {
+    const L = lnH.length;
+    const w = v2Windows(od, rate);
+    const W = w.slice(0, 5).map(v => f32(v + 0.5));
+    const C = this.v2TailConstants(w);
+    for (let p = 0; p < this.P; p++) {
+      for (let j = 0; j < L; j++) {
+        const [muH, sigH, piH] = this.msp(l, comp, lnH[j], p, rate);
+        const [muT, sigT, piT] = this.msp(l, comp, lnT[j], p, rate);
+        const [st, cap] = this.v2Tail(muT, sigT, p * 2 + 1, C);
+        V[p * 2 * L + j] += 0.5 * f32(this.headScoreV2(muH, sigH, p * 2, W) * f32(1 - piH));
+        V[p * 2 * L + L + j] += 0.5 * f32(f32(1 - piT) * f32(f32(f32(1 - piH) * st) + f32(piH * cap)));
+      }
+    }
   }
 
   // chart constants of rules.v1_ln_score (they depend only on the OD windows)
@@ -232,7 +299,7 @@ export class Reader {
     for (const { S, p0 } of await Promise.all(parts)) Reader.accumulate(v1a, S, p0, A);
   }
 
-  async perAction(tk, od, onProgress, pool = null, rate = 1) {
+  async perAction(tk, od, onProgress, pool = null, rate = 1, withLn = true) {
     const A = tk.nActions;
     const { token_mean: mt, token_scale: st } = this.R;
     const xs = new Float32Array(A * 17);
@@ -244,18 +311,26 @@ export class Reader {
       xm[b] = xm[b + 3]; xm[b + 1] = xm[b + 2]; xm[b + 2] = c1; xm[b + 3] = c0;
     }
     const v1a = new Float64Array(this.P * A);
+    const lnV2 = new Float64Array(withLn ? this.P * 2 * tk.lnH.length : 0);   // ScoreV2 of LN heads / tails (rice-ln-od r1, face item)
+    const ls = [];
     const prog = onProgress || (() => {});
     if (pool && pool.size) {
       // overlap: helpers score orientation 0 while the encoder runs orientation 1
       const l0 = await this.encode(xs, A, prog, 0, 30);
       const s0 = this.secondLayer(l0, tk, od, v1a, pool, rate);
+      if (withLn) this.lnV2Accumulate(l0, tk.comp, tk.lnH, tk.lnT, od, rate, lnV2);
       const l1 = await this.encode(xm, A, prog, 30, 30);
       await s0; prog(75);
-      await this.secondLayer(l1, tk, od, v1a, pool, rate); prog(95);
+      const s1 = this.secondLayer(l1, tk, od, v1a, pool, rate);
+      if (withLn) this.lnV2Accumulate(l1, tk.comp, tk.lnH, tk.lnT, od, rate, lnV2);
+      await s1; prog(95);
+      ls.push(l0, l1);
     } else {
       for (let mirror = 0; mirror < 2; mirror++) {
         const l = await this.encode(mirror ? xm : xs, A, prog, mirror * 45, 40);
         await this.secondLayer(l, tk, od, v1a, null, rate);
+        if (withLn) this.lnV2Accumulate(l, tk.comp, tk.lnH, tk.lnT, od, rate, lnV2);
+        ls.push(l);
         prog(mirror * 45 + 45);
       }
     }
@@ -265,16 +340,30 @@ export class Reader {
       for (let a = 0; a < A; a++) s += v1a[p * A + a];
       acc[p] = s / tk.nNotes;
     }
-    return { acc, v1a };
+    return { acc, v1a, lnV2, ls };
   }
 
-  // anchor.theta_star_grid + ps_readout.thetas (rule v1, 96 %)
-  theta(acc) {
+  // whole-chart ScoreV1 accuracy curve re-judged at another OD, reusing the encoder outputs ls (OD only enters the windows)
+  async accAtOd(ls, tk, od, pool = null, rate = 1) {
+    const A = tk.nActions;
+    const v = new Float64Array(this.P * A);
+    for (const l of ls) await this.secondLayer(l, tk, od, v, pool && pool.size ? pool : null, rate);
+    const acc = new Float64Array(this.P);
+    for (let p = 0; p < this.P; p++) {
+      let s = 0;
+      for (let a = 0; a < A; a++) s += v[p * A + a];
+      acc[p] = s / tk.nNotes;
+    }
+    return acc;
+  }
+
+  // anchor.theta_star_grid + ps_readout.thetas (rule v1 at 96 % by default; the face item passes the v2 line 0.97)
+  theta(acc, thr = this.R.threshold_v1) {
     const grid = this.R.theta_grid, P = grid.length;
     const z = new Float64Array(P);
     for (let p = 0; p < P; p++) z[p] = Math.log(Math.min(Math.max(1 - acc[p], 1e-12), 1));
     for (let p = 1; p < P; p++) if (z[p] > z[p - 1]) z[p] = z[p - 1];
-    const zt = Math.log(1 - this.R.threshold_v1);
+    const zt = Math.log(1 - thr);
     let t, flag = '';
     if (!z.every(Number.isFinite)) return { theta: NaN, flag: 'missing' };
     if (z[0] <= zt) { t = grid[0]; flag = 'censored_low'; }

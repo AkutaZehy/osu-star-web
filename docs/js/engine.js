@@ -15,6 +15,18 @@ export const JACK_MAX_LN = 0.3;   // the 'about one dan low' finding is from ric
 export const SV_LIMIT = 0.10;
 export const MOD_NAME = { 1: 'NoMod', 0.75: 'HT', 1.5: 'DT' };
 export const POOL_MIN_ACTIONS = 3000;   // shorter charts are fast enough on one thread     // research rule: > 10 % of notes with scroll speed off the main speed by > 10 %
+// rice / face items and the OD8 reading (research repo docs/rice-ln-od-r1-protocol-2026-10-15.md): conventions read off the
+// same reference player, not crowd answers; the total star is unchanged.
+//   item star = star + b * SUB_C * (theta*_item - theta*_all), b = tree star scale (1.6089), SUB_C = DT rule b_1.5
+export const SUB_C = 1.1013;
+export const SUB_MIN_ACTIONS = 50, SUB_MIN_SHARE = 0.05;   // subset actions, subset notes / all notes
+export const FACE_LINE = 0.97;                               // face item: ScoreV2 at 97 % on LN heads + tails
+export const OD9_FROM = 6.3;                                 // total star >= 6.3 (REFORM ALPHA) -> OD9, else OD8
+
+export function subStar(star, thetaAll, thetaItem, b) {
+  const k = b * SUB_C;
+  return star + k * (thetaItem - thetaAll);
+}
 
 const FEATURE_LABEL = {
   od: 'OD', log_dur: '时长', n: '物件数', nps: '平均密度', ln_frac: '长条比例', nps_max_1000: '1 秒最高密度',
@@ -45,7 +57,7 @@ export class Engine {
   }
 
   // rate: 1 (NoMod), 0.75 (HT) or 1.5 (DT); see analysis/web-rate-r1/score_rate.py for the reference
-  async scoreBytes(bytes, { oszHasOsb = false, onProgress = null, withSegments = true, rate = 1 } = {}) {
+  async scoreBytes(bytes, { oszHasOsb = false, onProgress = null, withSegments = true, rate = 1, withSub = true } = {}) {
     const t0 = performance.now();
     const text = new TextDecoder('utf-8').decode(bytes);
     const meta = metadata(text);
@@ -53,7 +65,7 @@ export class Engine {
       beatmapSetId: meta.beatmapSetId, md5: md5Hex(bytes), mode: meta.mode, keys: meta.keys };
     try {
       if (!RATES.includes(rate)) throw new Error('rate must be 1, 0.75 or 1.5');
-      const r = await this.score(text, { oszHasOsb, onProgress, withSegments, rate });
+      const r = await this.score(text, { oszHasOsb, onProgress, withSegments, rate, withSub });
       return { ok: true, ...base, ...r, seconds: (performance.now() - t0) / 1000 };
     } catch (e) {
       const reason = e instanceof ChartError ? e.reason : 'parse_error';
@@ -65,7 +77,7 @@ export class Engine {
     }
   }
 
-  async score(text, { oszHasOsb, onProgress, withSegments, rate }) {
+  async score(text, { oszHasOsb, onProgress, withSegments, rate, withSub = true }) {
     // 1. hand features (same order as the reference: parse_osu checks mode / keys / note count first); times / rate, file OD
     const pf = parseOsuFeat(text);
     const fn = prepareFeatureNotes(pf);
@@ -75,12 +87,15 @@ export class Engine {
     const { notes, od } = loadChart(text);
     const tk = tokensFromNotes(notes, rate);
     const usePool = this.pool && tk.nActions >= POOL_MIN_ACTIONS;
-    const { acc, v1a } = await this.reader.perAction(tk, od, onProgress ? p => onProgress('encode', p) : null, usePool ? this.pool : null, rate);
+    const { acc, v1a, lnV2, ls } = await this.reader.perAction(tk, od, onProgress ? p => onProgress('encode', p) : null,
+      usePool ? this.pool : null, rate, withSub);
     const { theta, flag } = this.reader.theta(acc);
     // 3. tree
     const row = this.tree.columns.map(c => (c === 's29' ? theta : F[c]));
     const reading = predictTree(this.tree, row);
     const star = this.tree.star_scale.a + this.tree.star_scale.b * reading;
+    // 4. rice / face items and the OD8 (OD9) reading
+    const sub = withSub ? await this.subReadings({ tk, od, v1a, lnV2, ls, theta, flag, star, rate, pool: usePool ? this.pool : null }) : null;
     // flags
     const sv = svFracSafe(text);
     const sb = sbLines(text);
@@ -110,7 +125,46 @@ export class Engine {
     let tmax = 0;
     for (const n of notes) tmax = Math.max(tmax, n[1], n[0]);
     return { rate, star, reading, theta, thetaFlag: flag, nNotes: tk.nNotes, nActions: tk.nActions, od, durationS: tmax / 1000 / rate,
-      features: F, acc: Array.from(acc), reliable: !(flags.sv || flags.storyboard || flags.outOfRange), flags, segments, hardest };
+      features: F, acc: Array.from(acc), reliable: !(flags.sv || flags.storyboard || flags.outOfRange), flags, segments, hardest, sub };
+  }
+
+  // research repo analysis/rice-ln-od-r1/rlo_core.readings: rice = taps (not LN head, not release) on the ScoreV1 curve at 96 %;
+  // face = LN heads + tails on the ScoreV2 curve at 97 %; OD = whole chart re-judged at OD8 (OD9 from 6.3 stars) at 96 % ScoreV1
+  async subReadings({ tk, od, v1a, lnV2, ls, theta, flag, star, rate, pool }) {
+    const t0 = performance.now();
+    const P = this.reader.P, A = tk.nActions, L = tk.lnH.length, b = this.tree.star_scale.b;
+    const head = new Uint8Array(A);
+    for (const x of tk.lnH) head[x] = 1;
+    let nRice = 0;
+    for (let a = 0; a < A; a++) if (!tk.comp[a] && !head[a]) nRice++;
+    const item = (ok, n, accFn, thr) => {
+      if (!n) return { ok: false, n, theta: null, flag: 'empty', star: null };
+      const { theta: t, flag: f } = this.reader.theta(accFn(), thr);
+      return { ok, n, theta: t, flag: f, star: ok ? subStar(star, theta, t, b) : null };
+    };
+    const rice = item(nRice >= SUB_MIN_ACTIONS && nRice / tk.nNotes >= SUB_MIN_SHARE, nRice, () => {
+      const acc = new Float64Array(P);
+      for (let p = 0; p < P; p++) {
+        let s = 0;
+        for (let a = 0; a < A; a++) if (!tk.comp[a] && !head[a]) s += v1a[p * A + a];
+        acc[p] = s / nRice;
+      }
+      return acc;
+    });
+    const face = item(2 * L >= SUB_MIN_ACTIONS && L / tk.nNotes >= SUB_MIN_SHARE, L, () => {
+      const acc = new Float64Array(P);
+      for (let p = 0; p < P; p++) {
+        let s = 0;
+        for (let j = 0; j < 2 * L; j++) s += lnV2[p * 2 * L + j];
+        acc[p] = s / (2 * L);
+      }
+      return acc;
+    }, FACE_LINE);
+    const odUsed = star >= OD9_FROM ? 9 : 8;
+    let odTheta = theta, odFlag = flag;
+    if (odUsed !== od) ({ theta: odTheta, flag: odFlag } = this.reader.theta(await this.reader.accAtOd(ls, tk, odUsed, pool, rate)));
+    const odItem = { od: odUsed, fileOd: od, theta: odTheta, flag: odFlag, star: subStar(star, theta, odTheta, b), changed: odUsed !== od };
+    return { rice, face, od: odItem, ms: performance.now() - t0 };
   }
 }
 

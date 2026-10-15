@@ -6,7 +6,7 @@ import {
 import {
   listOsz, parseOsuHeader, decodeText, skipReason, mergeMeta, displayName,
   unreliableReasons, jackHint, buildCopyText, buildSegmentsSvg, fmtStar, fmtTime, SEG_CAPTION,
-  MOD_SHORT, HT_NOTE, modLabel,
+  MOD_SHORT, HT_NOTE, modLabel, subRows, SUB_NOTE,
 } from './ui-lib.js';
 
 const RATES = [1, 0.75, 1.5];
@@ -328,6 +328,8 @@ function renderItem(it) {
     const jh = jackHint(r);
     if (jh) extra.push(h('div', { class: 'note', text: jh }));
     if (r.rate === 0.75) extra.push(h('div', { class: 'note', text: HT_NOTE }));
+    const sp = subPanel(r);
+    if (sp) extra.push(sp);
     extra.push(danReferencePanel(r));
     const svg = buildSegmentsSvg(r.segments, r.hardest);
     if (svg) {
@@ -349,6 +351,20 @@ function renderItem(it) {
 
   if (it.status === 'done') extra.push(copyRow(it));
   el.append(side, h('div', { class: 'body' }, info, extra));
+}
+
+function subPanel(result) {
+  const rows = subRows(result);
+  if (!rows.length) return null;
+  const list = h('ul', { class: 'sub-list' });
+  for (const r of rows) {
+    list.append(h('li', { class: r.star === null ? 'none' : null },
+      h('span', { class: 'sub-label', text: r.label }),
+      h('strong', { class: 'sub-star', text: r.star === null ? '—' : '★ ' + fmtStar(r.star) }),
+      r.text ? h('span', { class: 'sub-text muted', text: r.text }) : null));
+  }
+  return h('section', { class: 'sub-items', 'aria-label': '米 / 面分项与 OD 口径' },
+    h('h3', { text: '分项（约定换算）' }), list, h('p', { class: 'muted sub-caption', text: SUB_NOTE }));
 }
 
 function danReferencePanel(result) {

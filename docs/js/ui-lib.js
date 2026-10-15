@@ -16,6 +16,29 @@ export const HT_NOTE =
   'HT 读数未经检验：模型没有用 HT 成绩训练或检验，只是把谱面放慢到 0.75 倍后按同一方法计算';
 export function modLabel(rate) { return MOD_LABELS[rate] || `${rate} 倍`; }
 
+export const SUB_NOTE =
+  '分项与 OD 口径为约定换算，不参与总星数。米分项只看单点（96% ScoreV1）；面分项只看长条头尾，按 97% ScoreV2，' +
+  '这条线比 96% ScoreV1 严，所以面分项通常比总星数高；OD 口径把判定窗换成 OD8（6.3 星以上用 OD9）重算';
+
+/** 米 / 面分项与 OD 口径的三行：[{ key, label, star|null, text }]。result.sub 缺失时返回 []。 */
+export function subRows(result) {
+  const s = result && result.ok && result.sub;
+  if (!s) return [];
+  const edge = (f) => (String(f || '').startsWith('censored') ? '（超出参照范围）' : '');
+  const rows = [];
+  rows.push(s.rice.ok
+    ? { key: 'rice', label: '米', star: s.rice.star, text: edge(s.rice.flag) }
+    : { key: 'rice', label: '米', star: null, text: '米太少' });
+  rows.push(s.face.ok
+    ? { key: 'face', label: '面', star: s.face.star, text: '97% ScoreV2' + edge(s.face.flag) }
+    : { key: 'face', label: '面', star: null, text: '长条太少' });
+  const odName = `OD${s.od.od} 口径`;
+  rows.push(s.od.changed
+    ? { key: 'od', label: odName, star: s.od.star, text: `谱面文件 OD ${Number(s.od.fileOd).toFixed(1)}` + edge(s.od.flag) }
+    : { key: 'od', label: odName, star: s.od.star, text: `谱面文件已是 OD${s.od.od}` });
+  return rows;
+}
+
 export function decodeText(u8) {
   return new TextDecoder('utf-8').decode(u8); // 默认会去掉 BOM
 }
@@ -168,6 +191,7 @@ export function buildCopyText(result, header, fileName, ver, references) {
   }
   const jh = jackHint(result);
   if (jh) lines.push(`提示：${jh}`);
+  for (const r of subRows(result)) lines.push(`${r.label}：${r.star === null ? r.text : fmtStar(r.star) + (r.text ? `（${r.text}）` : '')}`);
   if (result && result.ok && result.rate === 0.75) lines.push(`提示：${HT_NOTE}`);
   if (result && result.ok) lines.push(...danReferenceCopyLines(references));
   return lines.join('\n');
