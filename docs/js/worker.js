@@ -48,6 +48,7 @@ async function handle(m) {
       result = await engine.scoreBytes(m.bytes instanceof Uint8Array ? m.bytes : new Uint8Array(m.bytes), {
         oszHasOsb: !!m.oszHasOsb,
         rate: m.rate || 1,
+        withSub: !!m.withSub,
         onProgress: (stage, pct) => {
           const p = Math.round(pct);
           if (p !== last) { last = p; self.postMessage({ type: 'progress', id, stage, pct: p }); }

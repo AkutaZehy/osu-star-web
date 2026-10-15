@@ -68,6 +68,12 @@ async function score(msg) {
       nNotes: h.nObjects, nActions: Math.round(h.nObjects * 1.3), od: 8, durationS,
       seconds: DELAY_MS / 1000, reliable: !(flags.sv || flags.storyboard || flags.outOfRange),
       flags, segments, hardest: hard,
+      sub: {
+        rice: b % 3 === 0 ? { ok: false, n: 20, theta: null, flag: 'empty', star: null } : { ok: true, n: 900, theta: 0, flag: '', star: star - 0.4 },
+        face: b % 2 === 0 ? { ok: false, n: 3, theta: null, flag: '', star: null } : { ok: true, n: 400, theta: 0, flag: '', star: star + 1.2 },
+        od: { od: star >= 6.3 ? 9 : 8, fileOd: 8, theta: 0, flag: '', star: star >= 6.3 ? star + 0.25 : star, changed: star >= 6.3 },
+        ms: 1,
+      },
     };
   }
   self.postMessage({ type: 'result', id, result });

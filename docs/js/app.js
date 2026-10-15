@@ -6,7 +6,7 @@ import {
 import {
   listOsz, parseOsuHeader, decodeText, skipReason, mergeMeta, displayName,
   unreliableReasons, jackHint, buildCopyText, buildSegmentsSvg, fmtStar, fmtTime, SEG_CAPTION,
-  MOD_SHORT, HT_NOTE, modLabel,
+  MOD_SHORT, HT_NOTE, modLabel, subRows, SUB_NOTE,
 } from './ui-lib.js';
 import {
   validateLadder, ladder, parseAcc, reverseNote, reverseCaption, lnNote, fmtLadderStar, ladderCopyLine,
@@ -49,6 +49,7 @@ const state = {
   uid: 0,
   job: 0,
   mod: loadMod(),
+  experimental: loadExperimental(),
   references: null,
   referencesPhase: 'loading',
   ladder: null,
@@ -64,6 +65,22 @@ function loadMod() {
 
 function saveMod(rate) {
   try { localStorage.setItem(MOD_KEY, String(rate)); } catch { /* 无痕模式等：不记住也没关系 */ }
+}
+
+// 实验性功能开关（达成水平表、米 / 面分项、OD 口径）：默认关；关着时不渲染这些面板，计算模块也不算分项
+const EXP_KEY = 'osu-star-experimental';
+function loadExperimental() {
+  try { return localStorage.getItem(EXP_KEY) === '1'; } catch { return false; }
+}
+function saveExperimental(on) {
+  try { localStorage.setItem(EXP_KEY, on ? '1' : '0'); } catch { /* 不记住也没关系 */ }
+}
+// 该倍速的结果是否已经够用：开着实验性功能时，没有分项（关着时算的）的结果要重算
+function hasUsableResult(it, rate) {
+  const res = it.results.get(rate);
+  if (!res) return false;
+  if (!res.ok || !state.experimental) return true;
+  return !!res.subComputed;   // 关着开关时算出的结果没有分项，开着时要重算
 }
 
 async function loadDanReferences() {
@@ -174,17 +191,17 @@ function onWorkerMessage(ev) {
 function pump() {
   if (state.phase !== 'ready' || state.current) return;
   const rate = state.mod;
-  const next = state.items.find((x) => x.bytes && !x.failed && !x.results.has(rate));
+  const next = state.items.find((x) => x.bytes && !x.failed && !hasUsableResult(x, rate));
   if (!next) return;
   const job = ++state.job;
-  state.current = { it: next, rate, job };
+  state.current = { it: next, rate, job, withSub: state.experimental };
   next.status = 'running';
   next.stage = '开始';
   next.pct = 0;
   renderItem(next);
   const bytes = next.bytes.slice();
   state.worker.postMessage(
-    { type: 'score', id: job, bytes, name: next.name, oszHasOsb: next.oszHasOsb, rate },
+    { type: 'score', id: job, bytes, name: next.name, oszHasOsb: next.oszHasOsb, rate, withSub: state.experimental },
     [bytes.buffer],
   );
 }
@@ -195,6 +212,7 @@ function finishCurrent(result) {
   if (cur) {
     const it = cur.it;
     const res = result || { ok: false, reason: 'parse_error', message: '没有收到计算结果' };
+    if (res.ok) res.subComputed = !!cur.withSub;
     if (!res.ok && RATE_FREE_REJECT.includes(res.reason)) for (const r of RATES) it.results.set(r, res);
     else it.results.set(cur.rate, res);
     if (cur.rate === state.mod) {
@@ -222,9 +240,31 @@ function setMod(rate) {
   for (const it of state.items) {
     if (it.status === 'skipped' || it.failed) continue;
     const cur = state.current;
-    if (it.results.has(rate)) { it.status = 'done'; it.result = it.results.get(rate); }
+    if (hasUsableResult(it, rate)) { it.status = 'done'; it.result = it.results.get(rate); }
     else if (cur && cur.it === it && cur.rate === rate) { it.status = 'running'; it.result = null; }
     else { it.status = 'queued'; it.result = null; }
+    renderItem(it);
+  }
+  pump();
+}
+
+function setExperimental(on) {
+  state.experimental = !!on;
+  saveExperimental(state.experimental);
+  const box = document.querySelector('#experimental');
+  if (box) box.checked = state.experimental;
+  if (!state.experimental) {
+    for (const it of state.items) if (it.status === 'done') renderItem(it);   // 只是不再显示，结果保留
+    return;
+  }
+  // 开启：当前倍速下没有分项的结果重算（其它倍速的在切换时按同一规则补算）
+  const rate = state.mod;
+  for (const it of state.items) {
+    if (it.status === 'skipped' || it.failed) continue;
+    if (hasUsableResult(it, rate)) { renderItem(it); continue; }
+    const cur = state.current;
+    if (cur && cur.it === it && cur.rate === rate) continue;   // 正在算的那一局是按旧设置算的，算完会再排队
+    it.status = 'queued'; it.result = null;
     renderItem(it);
   }
   pump();
@@ -341,6 +381,10 @@ function renderItem(it) {
     if (reasons.length) el.classList.add('unreliable');
     const tag = MOD_SHORT[r.rate || 1];
     side = h('div', { class: 'star' }, '★ ' + fmtStar(r.star), tag ? h('span', { class: 'mod-tag', text: tag }) : null);
+    if (state.experimental && r.sub && r.sub.v2 && Number.isFinite(r.sub.v2.star)) {
+      side.append(h('span', { class: 'star-alt', title: '整谱按 97% ScoreV2（LN 段位口径，OD 用谱面文件）读出的星数，约定换算，仅供参考',
+        text: 'LN 口径 ★ ' + fmtStar(r.sub.v2.star) }));
+    }
     if (reasons.length) {
       extra.push(h('div', { class: 'warn' },
         h('span', { class: 'tag', text: '不可靠' }),
@@ -349,7 +393,11 @@ function renderItem(it) {
     const jh = jackHint(r);
     if (jh) extra.push(h('div', { class: 'note', text: jh }));
     if (r.rate === 0.75) extra.push(h('div', { class: 'note', text: HT_NOTE }));
-    extra.push(ladderPanel(r, it));
+    if (state.experimental) {
+      extra.push(ladderPanel(r, it));
+      const sp = subPanel(r);
+      if (sp) extra.push(sp);
+    }
     extra.push(danReferencePanel(r));
     const svg = buildSegmentsSvg(r.segments, r.hardest);
     if (svg) {
@@ -371,6 +419,20 @@ function renderItem(it) {
 
   if (it.status === 'done') extra.push(copyRow(it));
   el.append(side, h('div', { class: 'body' }, info, extra));
+}
+
+function subPanel(result) {
+  const rows = subRows(result);
+  if (!rows.length) return null;
+  const list = h('ul', { class: 'sub-list' });
+  for (const r of rows) {
+    list.append(h('li', { class: r.star === null ? 'none' : null },
+      h('span', { class: 'sub-label', text: r.label }),
+      h('strong', { class: 'sub-star', text: r.star === null ? '—' : '★ ' + fmtStar(r.star) }),
+      r.text ? h('span', { class: 'sub-text muted', text: r.text }) : null));
+  }
+  return h('section', { class: 'sub-items', 'aria-label': '米 / 面分项与 OD 口径' },
+    h('h3', { text: '分项（约定换算）' }), list, h('p', { class: 'muted sub-caption', text: SUB_NOTE }));
 }
 
 function danReferencePanel(result) {
@@ -487,7 +549,8 @@ function copyRow(it) {
   const row = h('div', { class: 'actions' }, btn);
   btn.addEventListener('click', async () => {
     const references = selectDanReferences(it.result, referencesForModel(state.references, state.ver));
-    const text = buildCopyText(it.result, it.header, it.name, state.ver, references, ladderCopyLine(state.ladder, it.result));
+    const text = buildCopyText(it.result, it.header, it.name, state.ver, references,
+      state.experimental ? ladderCopyLine(state.ladder, it.result) : null, state.experimental);
     const ok = await copyText(text);
     row.querySelector('textarea')?.remove();
     if (ok) {
@@ -554,6 +617,12 @@ function setupUi() {
     b.addEventListener('click', () => setMod(Number(b.dataset.rate)));
   }
   syncModButtons();
+
+  const expBox = $('#experimental');
+  if (expBox) {
+    expBox.checked = state.experimental;
+    expBox.addEventListener('change', () => setExperimental(expBox.checked));
+  }
 
   $('#clear').addEventListener('click', () => {
     state.items = state.items.filter((x) => state.current && x === state.current.it);
