@@ -1,9 +1,9 @@
 export const DAN_REFERENCE_NOTE = '只比较本模型的谱面读数，不代表能通过对应段位；题型不同，手感也可能不同。';
-export const LN_REFERENCE_NOTE = 'LN 课程的计分口径与当前 96% ScoreV1 不同，只作谱面读数对照；模型中部分相邻段位有倒挂。';
+export const LN_REFERENCE_NOTE = '这里列的是 LN 段位谱按总星数标准（96% ScoreV1）的读数，和总星数直接可比；面段位另用 97% ScoreV2 比较。部分相邻段位有倒挂。';
 export const DAN_REFERENCE_WARNING = '当前谱面读数不可靠，附近参考也请谨慎看待。';
 
 export function validateDanReferences(data) {
-  if (!data || data.version !== 'P1h' || data.modelVersion !== '树星数 v1 (P1h)' || data.frozen !== '2026-10-14' || !Array.isArray(data.groups) || data.groups.length !== 2) {
+  if (!data || data.version !== 'P1h' || data.modelVersion !== '树星数 v1 (P1h)' || data.frozen !== '2026-10-14' || typeof data.starV2Line !== 'string' || !Array.isArray(data.groups) || data.groups.length !== 2) {
     throw new Error('段位参考版本或格式不正确');
   }
   const identifiers = new Set();
@@ -15,6 +15,10 @@ export function validateDanReferences(data) {
     for (const entry of group.entries) {
       if (!entry || typeof entry.id !== 'string' || !entry.id.startsWith(group.id + '-') || identifiers.has(entry.id) || typeof entry.label !== 'string' || !entry.label.trim() || !Number.isFinite(entry.star) || entry.star < 0 || typeof entry.reliable !== 'boolean' || (entry.url !== undefined && !/^https:\/\/osu\.ppy\.sh\/beatmaps\/[1-9]\d*$/.test(entry.url))) {
         throw new Error('段位参考条目不正确');
+      }
+      // starV2：整谱 97% ScoreV2 读数（面段位用），LN 组每条都要有，REFORM 组不带
+      if (group.id === 'ln' ? !(Number.isFinite(entry.starV2) && entry.starV2 >= 0) : entry.starV2 !== undefined) {
+        throw new Error('段位参考的 97% ScoreV2 读数不正确');
       }
       identifiers.add(entry.id);
     }

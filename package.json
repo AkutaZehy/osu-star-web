@@ -8,7 +8,8 @@
     "test": "node tests/compare.mjs",
     "test:references": "node tests/dan-reference.mjs",
     "test:ladder": "node --test tests/acc-ladder.mjs",
-    "test:items": "node tests/rice-ln-od.mjs"
+    "test:items": "node tests/rice-ln-od.mjs",
+    "test:dan": "node --test tests/dan-estimate.mjs"
   },
   "dependencies": {
     "fflate": "0.8.3",

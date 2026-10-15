@@ -209,3 +209,13 @@ details ul { padding-left: 1.2em; }
   .drop { padding: 22px 12px; }
   .dan-groups { grid-template-columns: 1fr; gap: 12px; }
 }
+/* 米 / 面段位：谱名下面一行，和主读数并排 */
+.dan-est { margin-top: 6px; }
+.dan-est-items { display: flex; flex-wrap: wrap; gap: 4px 16px; }
+.dan-est-item { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 6px; font-size: 0.92rem; min-width: 0; }
+.dan-est-label { color: var(--muted); font-size: 0.82rem; white-space: nowrap; }
+.dan-est-text { color: var(--star); font-weight: 600; }
+.dan-est-note { color: var(--muted); font-size: 0.78rem; }
+.dan-est-item.muted-item .dan-est-text { color: var(--muted); font-weight: 500; }
+.dan-est-sub { font-size: 0.78rem; margin-top: 2px; }
+.dan-est-caution { color: var(--warn-text); font-size: 0.78rem; margin-top: 2px; }

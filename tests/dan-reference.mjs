@@ -10,6 +10,7 @@ import { VERSION, FROZEN } from '../docs/js/engine.js';
 
 const catalog = validateDanReferences(JSON.parse(fs.readFileSync(new URL('../docs/data/dan-references.json', import.meta.url), 'utf8')));
 const fixtures = JSON.parse(fs.readFileSync(new URL('./fixtures/reference.json', import.meta.url), 'utf8')).charts;
+const itemFixtures = JSON.parse(fs.readFileSync(new URL('./fixtures/reference-rice-ln-od.json', import.meta.url), 'utf8')).charts;
 const model = { version: VERSION, frozen: FROZEN };
 const result = (star, reliable = true) => ({ ok: true, star, reliable });
 const identifiers = (group) => group.matches.map((entry) => entry.id);
@@ -64,7 +65,13 @@ test('all 35 references retain the exact fixture identity, source group and P1h 
       assert.match(fixture.source, group.id === 'reform'
         ? /^test_beatmap\/Various Artists - Dan ~ REFORM ~ (1st Pack|2nd Pack|FINAL) /u
         : /^test_beatmap\/LN dan\/.+4K LN Dan Courses v2.+\(Marathon\)\]\.osu$/u);
-      assert.deepEqual(Object.keys(entry).sort(), ['id', 'label', 'reliable', 'star', 'url']);
+      assert.deepEqual(Object.keys(entry).sort(), group.id === 'ln' ? ['id', 'label', 'reliable', 'star', 'starV2', 'url'] : ['id', 'label', 'reliable', 'star', 'url']);
+      if (group.id === 'ln') {
+        // whole-chart 97 % ScoreV2 star (face dan reference) vs the Python reference of rice-ln-od r1 (v2_c1)
+        const py = itemFixtures.filter((c) => c.sha256 === fixture.sha256 && c.member === null && c.rate === 1);
+        assert.equal(py.length, 1, entry.id);
+        assert.ok(Math.abs(entry.starV2 - py[0].v2_c1) < 1e-6, entry.id);
+      }
       assert.match(entry.url, /^https:\/\/osu\.ppy\.sh\/beatmaps\/[1-9]\d*$/u);
     }
   }
