@@ -7,8 +7,11 @@ import { danEstimate } from './js/dan-estimate.js';
 import { validateDanReferences, referencesForModel } from './js/dan-reference.js';
 
 const qs = new URLSearchParams(location.search);
-const HELPERS = Math.max(0, Math.min(8, parseInt(qs.get('helpers') || '0', 10) || 0));
+const clampHelpers = v => Math.max(0, Math.min(8, Math.round(Number(v)) || 0));
 const WS_URL = qs.get('ws') || `ws://${location.host}/websocket/v2`;
+// tosu injects window.COUNTER_PATH into the page; fall back to the first path segment (the counter folder)
+const COUNTER_PATH = window.COUNTER_PATH || decodeURI(location.pathname.split('/').filter(Boolean)[0] || '');
+const CMD_URL = `ws://${location.host}/websocket/commands?l=${encodeURI(COUNTER_PATH)}`;
 const FILE_URL = '/files/beatmap/file';
 const STATE_PLAY = 2;            // tosu GameState.play
 const DEBOUNCE_MS = 400;         // song select scrolling: wait until the selection settles
@@ -20,11 +23,39 @@ const S = {
   ws: null, worker: null, helpers: [], phase: 'idle',   // idle | loading | ready | error
   playing: null, key: null, info: null, job: null, jobId: 0, timer: null, retries: 0, connected: false,
   cache: loadCache(), dans: null,
+  // settings.json (tosu settings page); the URL parameters ?hint=0 / ?helpers=N only set the starting values
+  settings: { hideWhilePlaying: false, showHint: qs.get('hint') !== '0', helpers: clampHelpers(qs.get('helpers') || 0) },
 };
 
-if (qs.get('hint') === '0') $('hint').hidden = true;
 connect();
+connectSettings();
 loadDanReferences();
+
+// ---------------------------------------------------------------- tosu settings (Settings API, tosu >= 2.6)
+// getSettings answers with the saved values (defaults from settings.json filled in); updateSettings arrives when the
+// user changes them on tosu's settings page. Older tosu without /websocket/commands: the defaults stay.
+function connectSettings(delay = 2000) {
+  let ws;
+  try { ws = new WebSocket(CMD_URL); } catch (e) { return; }
+  let opened = false;
+  ws.onopen = () => { opened = true; ws.send(`getSettings:${encodeURI(COUNTER_PATH)}`); };
+  ws.onmessage = ev => {
+    let d;
+    try { d = JSON.parse(ev.data); } catch (e) { return; }
+    if (d && (d.command === 'getSettings' || d.command === 'updateSettings')) applySettings(d.message);
+  };
+  ws.onclose = () => setTimeout(() => connectSettings(opened ? 2000 : Math.min(delay * 2, 30000)), opened ? 2000 : delay);
+}
+
+function applySettings(v) {
+  if (!v || typeof v !== 'object' || v.error) return;
+  if (Array.isArray(v)) v = Object.fromEntries(v.filter(x => x && x.uniqueID).map(x => [x.uniqueID, x.value]));
+  const bool = x => x === true || x === 'true';
+  if ('hideWhilePlaying' in v) S.settings.hideWhilePlaying = bool(v.hideWhilePlaying);
+  if ('showHint' in v) S.settings.showHint = bool(v.showHint);
+  if ('helpers' in v) S.settings.helpers = clampHelpers(v.helpers);
+  render();
+}
 
 // REFORM / LN dan charts read by the same model (small JSON, no computation)
 async function loadDanReferences() {
@@ -136,7 +167,7 @@ function startWorker() {
   catch (e) { S.phase = 'error'; S.error = '无法启动计算模块（浏览器不支持模块 Worker）'; return render(); }
   S.worker = w;
   const ports = [];
-  for (let i = 0; i < HELPERS; i++) {
+  for (let i = 0; i < S.settings.helpers; i++) {
     try {
       const h = new Worker(new URL('./js/sl-worker.js', import.meta.url), { type: 'module' });
       const ch = new MessageChannel();
@@ -186,6 +217,8 @@ function saveResult(key, res) {
 
 // ---------------------------------------------------------------- view
 function render() {
+  $('card').classList.toggle('hidden-play', !!(S.playing && S.settings.hideWhilePlaying));
+  $('hint').hidden = !S.settings.showHint;
   const info = S.info;
   const res = S.key ? S.cache.get(S.key) || (S.failed && S.failed.key === S.key ? S.failed.res : null) : null;
   $('title').textContent = info && info.checksum ? `${info.title}${info.version ? ` [${info.version}]` : ''}` : '';

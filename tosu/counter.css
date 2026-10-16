@@ -33,3 +33,4 @@ body { font-family: "Microsoft YaHei UI", "PingFang SC", "Noto Sans SC", system-
 .hint { font-size: 11px; line-height: 1.4; color: var(--muted); border-top: 1px solid rgba(255, 255, 255, 0.12); padding-top: 5px; }
 .foot { font-size: 10px; color: var(--muted); opacity: 0.8; }
 [hidden] { display: none !important; }
+#card.hidden-play { visibility: hidden; }

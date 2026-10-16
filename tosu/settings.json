@@ -1,0 +1,23 @@
+[
+  {
+    "uniqueID": "hideWhilePlaying",
+    "type": "checkbox",
+    "title": "打歌时隐藏插件",
+    "description": "开启后，打歌时整张卡片隐藏；回到选歌或结算界面再显示。打歌时本来就不计算，这个开关只管显不显示。",
+    "value": false
+  },
+  {
+    "uniqueID": "showHint",
+    "type": "checkbox",
+    "title": "显示使用提示",
+    "description": "卡片底部的“请在选歌界面打开，不要在打歌途中启用”提示。",
+    "value": true
+  },
+  {
+    "uniqueID": "helpers",
+    "type": "number",
+    "title": "辅助线程数",
+    "description": "长谱计算时额外使用的线程数（0–8）。越多算得越快，但占用更多 CPU。改动在下一次加载模型时生效。默认 0。",
+    "value": 0
+  }
+]
