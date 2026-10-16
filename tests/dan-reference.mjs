@@ -50,7 +50,8 @@ const expectedHashes = {
   'reform-epsilon': '68f30db44d73757e0ba29ea8a255e43baf358a9b47d921aed7e5beffd9eb9a63',
   'reform-gamma': '02bf168e5a42278c250d205f2722b6bc7c0a30669e22d5e5147c4ad594495d39',
   'reform-eta': '50846172498780da5e303d03b0f68814c439e7b274da2ba5ba5da703c0f0d536',
-  'reform-zeta': '820efd38839415a8d247334a929348853d1357f0c49b764046694fdc19a20e84',
+  // Zeta = Sample Dan v2 (credit to emik); the FINAL pack ZETA (820efd38…) is not the course in use
+  'reform-zeta': 'c4cd38cb9def17d45f34cdfed6a24678f42308e772515417122b86f6d739bb2e',
 };
 
 test('all 35 references retain the exact fixture identity, source group and P1h reading', () => {
@@ -64,7 +65,7 @@ test('all 35 references retain the exact fixture identity, source group and P1h 
       const fixture = matches[0];
       assert.equal(entry.star, fixture.star, entry.id);
       assert.match(fixture.source, group.id === 'reform'
-        ? /^test_beatmap\/Various Artists - Dan ~ REFORM ~ (1st Pack|2nd Pack|FINAL) /u
+        ? /^test_beatmap\/Various Artists - (Dan ~ REFORM ~ (1st Pack|2nd Pack|FINAL) |Zeta Sample Dan v2 .+credit to emik\)\]\.osu$)/u
         : /^test_beatmap\/LN dan\/.+4K LN Dan Courses v2.+\(Marathon\)\]\.osu$/u);
       assert.deepEqual(Object.keys(entry).sort(), group.id === 'ln' ? ['id', 'label', 'reliable', 'star', 'starV2', 'url'] : ['id', 'label', 'reliable', 'star', 'url']);
       if (group.id === 'ln') {
