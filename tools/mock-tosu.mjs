@@ -2,7 +2,7 @@
 // /files/beatmap/file and a v2 websocket at /websocket/v2 that pushes the mock state every 300 ms.
 //   node tools/mock-tosu.mjs [port]      default 24050
 // Drive it with GET /mock?file=<path to .osu>&state=<tosu GameState number>&mods=<JSON array of {acronym, settings}>
-// (each parameter optional; state 5 = song select, 2 = playing). GET /mock returns the current mock state.
+// (each parameter optional; state 5 = song select, 2 = playing; time=<ms> sets beatmap.time.live). GET /mock returns the current mock state.
 // /websocket/commands answers getSettings with the counter's settings.json defaults merged with the mock values;
 // GET /mock?settings=<JSON object> changes the values and pushes updateSettings, as tosu's settings page does.
 import http from 'node:http';
@@ -18,7 +18,7 @@ const MIME = {
   '.mjs': 'text/javascript; charset=utf-8', '.json': 'application/json; charset=utf-8', '.wasm': 'application/wasm; charset=utf-8',
   '.txt': 'text/plain; charset=utf-8',
 };
-const mock = { file: '', state: 5, mods: [], checksum: '', meta: {}, settings: {} };
+const mock = { file: '', state: 5, mods: [], checksum: '', meta: {}, settings: {}, live: 0, firstObject: 0 };
 const cmdClients = new Set();
 
 function setFile(f) {
@@ -27,6 +27,9 @@ function setFile(f) {
   const g = k => ((text.match(new RegExp(`^${k}:(.*)$`, 'm')) || [])[1] || '').trim();
   mock.file = f;
   mock.checksum = crypto.createHash('md5').update(buf).digest('hex');
+  const lines = text.split('\n');   // trim() below drops the \r of CRLF files
+  const ho = lines.slice(lines.findIndex(l => l.trim() === '[HitObjects]') + 1).filter(l => l.includes(','));
+  mock.firstObject = ho.length ? Math.min(...ho.map(l => Number(l.split(',')[2]))) : 0;
   mock.meta = { artist: g('Artist'), title: g('Title'), version: g('Version'), mapper: g('Creator'), mode: Number(g('Mode') || 0) };
 }
 
@@ -37,7 +40,7 @@ function v2() {
   return {
     client: 'lazer', state: { number: mock.state, name: mock.state === 2 ? 'play' : 'selectPlay' },
     beatmap: { checksum: mock.checksum, artist: mock.meta.artist, title: mock.meta.title, version: mock.meta.version,
-      mapper: mock.meta.mapper, mode: { number: mock.meta.mode, name: '' } },
+      mapper: mock.meta.mapper, mode: { number: mock.meta.mode, name: '' }, time: { live: mock.live, firstObject: mock.firstObject } },
     play: { mods: { checksum: '', number: 0, name: mock.mods.map(m => m.acronym).join(''), array: mock.mods,
       rate: sc ? sc.speed_change : DT ? 1.5 : HT ? 0.75 : 1 } },
     files: { beatmap: path.basename(mock.file) }, folders: { beatmap: path.dirname(mock.file) },
@@ -51,6 +54,7 @@ const server = http.createServer((req, res) => {
       if (u.searchParams.has('file')) setFile(u.searchParams.get('file'));
       if (u.searchParams.has('state')) mock.state = Number(u.searchParams.get('state'));
       if (u.searchParams.has('mods')) mock.mods = JSON.parse(u.searchParams.get('mods'));
+      if (u.searchParams.has('time')) mock.live = Number(u.searchParams.get('time'));
       if (u.searchParams.has('settings')) {
         Object.assign(mock.settings, JSON.parse(u.searchParams.get('settings')));
         const f = frame(JSON.stringify({ command: 'updateSettings', message: settingsValues() }));

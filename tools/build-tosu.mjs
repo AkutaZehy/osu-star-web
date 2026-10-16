@@ -11,7 +11,7 @@ const docs = path.join(root, 'docs');
 const outDir = path.join(root, 'dist', 'osu-star-tosu');
 // the worker's import graph (js/worker.js -> engine, reader, ...) and the helper worker
 const JS = ['worker.js', 'sl-worker.js', 'pool.js', 'engine.js', 'reader.js', 'osu.js', 'tokens.js', 'tdist.js', 'features.js',
-  'tree.js', 'md5.js', 'pyutil.js', 'dan-estimate.js', 'dan-reference.js'];
+  'tree.js', 'md5.js', 'pyutil.js', 'dan-estimate.js', 'dan-reference.js', 'ui-lib.js'];
 const MODEL = ['reader.json', 'tree.json', 'support.json', 'support-dt.json', 'encoder.onnx'];
 
 fs.rmSync(outDir, { recursive: true, force: true });
@@ -20,6 +20,8 @@ for (const f of fs.readdirSync(path.join(root, 'tosu'))) copy(path.join(root, 't
 for (const f of JS) copy(path.join(docs, 'js', f), path.join(outDir, 'js', f));
 copy(path.join(docs, 'data', 'dan-references.json'), path.join(outDir, 'data', 'dan-references.json'));
 for (const f of MODEL) copy(path.join(docs, 'model', f), path.join(outDir, 'model', f));
+// ui-lib.js (segment curve) imports fflate for the web page's .osz reader
+for (const f of ['fflate.mjs', 'LICENSE']) copy(path.join(docs, 'vendor', 'fflate', f), path.join(outDir, 'vendor', 'fflate', f));
 for (const f of fs.readdirSync(path.join(docs, 'vendor', 'ort'))) copy(path.join(docs, 'vendor', 'ort', f), path.join(outDir, 'vendor', 'ort', f));
 
 // every relative import of the copied modules must resolve inside the folder

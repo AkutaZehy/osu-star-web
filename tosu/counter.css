@@ -31,6 +31,23 @@ body { font-family: "Microsoft YaHei UI", "PingFang SC", "Noto Sans SC", system-
 .tag.bad { color: var(--bad); }
 .tag.info { color: var(--info); }
 .hint { font-size: 11px; line-height: 1.4; color: var(--muted); border-top: 1px solid rgba(255, 255, 255, 0.12); padding-top: 5px; }
+.curve { border-top: 1px solid rgba(255, 255, 255, 0.12); padding-top: 4px; }
+.curve-cap { font-size: 10px; color: var(--muted); }
+.spark { width: 100%; height: auto; display: block; }
+.spark .axis { stroke: rgba(255, 255, 255, 0.25); stroke-width: 1; }
+.spark .lbl { fill: var(--muted); font-size: 9px; }
+.spark .line { fill: none; stroke: var(--accent); stroke-width: 1.5; stroke-linejoin: round; }
+.spark .pt { fill: var(--accent); }
+.spark .pt.sparse { fill: #1b1d26; stroke: var(--muted); stroke-width: 1; }
+.spark .hl { fill: rgba(255, 211, 107, 0.14); }
+.spark .hit { fill: transparent; pointer-events: all; }
+.spark .tip { visibility: hidden; pointer-events: none; }
+.spark .col:hover .tip { visibility: visible; }
+.spark .guide { stroke: var(--muted); stroke-width: 0.75; stroke-dasharray: 2 2; }
+.spark .pt-on { fill: var(--accent); stroke: #1b1d26; stroke-width: 1; }
+.spark .tip-bg { fill: #1b1d26; stroke: rgba(255, 255, 255, 0.25); stroke-width: 0.75; }
+.spark .tip-t { fill: var(--fg); font-size: 9px; font-variant-numeric: tabular-nums; }
+.spark .playhead { stroke: #ffffff; stroke-width: 1.25; }
 .foot { font-size: 10px; color: var(--muted); opacity: 0.8; }
 [hidden] { display: none !important; }
 #card.hidden-play { visibility: hidden; }

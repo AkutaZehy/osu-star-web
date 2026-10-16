@@ -7,11 +7,16 @@
     "value": false
   },
   {
-    "uniqueID": "showHint",
-    "type": "checkbox",
-    "title": "显示使用提示",
-    "description": "卡片底部的“请在选歌界面打开，不要在打歌途中启用”提示。",
-    "value": true
+    "uniqueID": "bottomPanel",
+    "type": "options",
+    "title": "卡片底部显示",
+    "description": "使用提示：“请在选歌界面打开，不要在打歌途中启用”。难度曲线：和网页版一样的分段难度曲线（每 10 秒一段，只看起伏，不等于总星数），打歌时会标出当前位置。不显示：只留星数和段位。",
+    "options": [
+      "使用提示",
+      "难度曲线",
+      "不显示"
+    ],
+    "value": "使用提示"
   },
   {
     "uniqueID": "helpers",

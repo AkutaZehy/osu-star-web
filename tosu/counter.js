@@ -5,6 +5,7 @@ import { readMods } from './mods.js';
 import { VERSION, FROZEN } from './js/engine.js';
 import { danEstimate } from './js/dan-estimate.js';
 import { validateDanReferences, referencesForModel } from './js/dan-reference.js';
+import { buildSegmentsSvg, fmtTime } from './js/ui-lib.js';
 
 const qs = new URLSearchParams(location.search);
 const clampHelpers = v => Math.max(0, Math.min(8, Math.round(Number(v)) || 0));
@@ -15,8 +16,9 @@ const CMD_URL = `ws://${location.host}/websocket/commands?l=${encodeURI(COUNTER_
 const FILE_URL = '/files/beatmap/file';
 const STATE_PLAY = 2;            // tosu GameState.play
 const DEBOUNCE_MS = 400;         // song select scrolling: wait until the selection settles
-const CACHE_KEY = `osu-star-tosu|${FROZEN}|2|`;   // 2: results keep the 97 % ScoreV2 reading for the LN dan
-const CACHE_MAX = 400;
+const CACHE_KEY = `osu-star-tosu|${FROZEN}|3|`;   // 3: results keep the 97 % ScoreV2 reading and the segment curve
+const CACHE_MAX = 300;
+const BOTTOM = { hint: '使用提示', curve: '难度曲线', none: '不显示' };
 
 const $ = id => document.getElementById(id);
 const S = {
@@ -24,7 +26,9 @@ const S = {
   playing: null, key: null, info: null, job: null, jobId: 0, timer: null, retries: 0, connected: false,
   cache: loadCache(), dans: null,
   // settings.json (tosu settings page); the URL parameters ?hint=0 / ?helpers=N only set the starting values
-  settings: { hideWhilePlaying: false, showHint: qs.get('hint') !== '0', helpers: clampHelpers(qs.get('helpers') || 0) },
+  settings: { hideWhilePlaying: false, bottom: qs.get('hint') === '0' ? BOTTOM.none : qs.get('curve') === '1' ? BOTTOM.curve : BOTTOM.hint,
+    helpers: clampHelpers(qs.get('helpers') || 0) },
+  curveKey: null, curveEnd: 0, live: null,
 };
 
 connect();
@@ -52,7 +56,7 @@ function applySettings(v) {
   if (Array.isArray(v)) v = Object.fromEntries(v.filter(x => x && x.uniqueID).map(x => [x.uniqueID, x.value]));
   const bool = x => x === true || x === 'true';
   if ('hideWhilePlaying' in v) S.settings.hideWhilePlaying = bool(v.hideWhilePlaying);
-  if ('showHint' in v) S.settings.showHint = bool(v.showHint);
+  if ('bottomPanel' in v && Object.values(BOTTOM).includes(v.bottomPanel)) S.settings.bottom = v.bottomPanel;
   if ('helpers' in v) S.settings.helpers = clampHelpers(v.helpers);
   render();
 }
@@ -92,6 +96,10 @@ function onTosu(d) {
     title: [bm.artist, bm.title].filter(Boolean).join(' - '), version: bm.version || '', mods,
   };
   const key = info.checksum ? `${info.checksum}#${mods.ok ? mods.key : 'unsupported'}` : null;
+  // playhead: map-time position since the first object, in real seconds (segments are in real time from the first note)
+  const t = bm.time || {};
+  S.live = playing && Number.isFinite(t.live) && Number.isFinite(t.firstObject) && mods.ok ? (t.live - t.firstObject) / mods.rate / 1000 : null;
+  movePlayhead();
   const wasPlaying = S.playing;
   S.playing = playing;
   if (playing && wasPlaying !== true) enterPlay();
@@ -207,6 +215,9 @@ function saveResult(key, res) {
   const keep = res.ok
     ? { ok: true, star: res.star, reliable: res.reliable, thetaFlag: res.thetaFlag, md5: res.md5, rate: res.rate,
         v2: res.v2 ? { star: res.v2.star } : null, lnFrac: res.lnFrac,
+        // segment curve, rounded to keep the browser cache small
+        segments: (res.segments || []).map(g => ({ startS: r1(g.startS), endS: r1(g.endS), star: g.star === null ? null : r2(g.star), sparse: g.sparse })),
+        hardest: res.hardest ? { startS: r1(res.hardest.startS), endS: r1(res.hardest.endS), star: r2(res.hardest.star) } : null,
         flags: { sv: res.flags.sv, storyboard: res.flags.storyboard, outOfRangeReasons: res.flags.outOfRangeReasons, jackHeavy: res.flags.jackHeavy } }
     : { ok: false, reason: res.reason, message: res.message };
   S.cache.delete(key);
@@ -218,7 +229,7 @@ function saveResult(key, res) {
 // ---------------------------------------------------------------- view
 function render() {
   $('card').classList.toggle('hidden-play', !!(S.playing && S.settings.hideWhilePlaying));
-  $('hint').hidden = !S.settings.showHint;
+  $('hint').hidden = S.settings.bottom !== BOTTOM.hint;
   const info = S.info;
   const res = S.key ? S.cache.get(S.key) || (S.failed && S.failed.key === S.key ? S.failed.res : null) : null;
   $('title').textContent = info && info.checksum ? `${info.title}${info.version ? ` [${info.version}]` : ''}` : '';
@@ -251,6 +262,7 @@ function render() {
   else status = '准备计算…';
   if (info && info.mods.ok && info.mods.notes.length && !dim) tags.push(['info', info.mods.notes.join('；')]);
   renderDan(dan, info);
+  renderCurve(res && res.ok && S.settings.bottom === BOTTOM.curve ? res : null);
   starEl.textContent = star;
   starEl.classList.toggle('dim', dim);
   $('status').textContent = status;
@@ -279,6 +291,35 @@ function renderDan(est, info) {
     n.textContent = `${m.label}：用这组 Mod 下的读数和 NoMod 段位谱比较`;
     box.append(n);
   }
+}
+
+const r1 = x => Math.round(x * 10) / 10, r2 = x => Math.round(x * 100) / 100;
+
+// 难度曲线 (setting): the web page's segment curve (10 s windows, old public-star scale, only for the shape)
+function renderCurve(res) {
+  const box = $('curve');
+  const key = res ? S.key : null;
+  box.hidden = !res || !res.segments || !res.segments.length;
+  if (key === S.curveKey) return;
+  S.curveKey = key;
+  if (box.hidden) { box.replaceChildren(); return; }
+  const svg = buildSegmentsSvg(res.segments, res.hardest);
+  S.curveEnd = Math.max(...res.segments.map(g => g.endS), 1);
+  // same plot box as buildSegmentsSvg (W 320, H 96, L 30, R 8, T 8, B 18)
+  box.innerHTML = svg.replace('</svg>', '<line id="playhead" class="playhead" x1="0" y1="8" x2="0" y2="78" visibility="hidden"/></svg>');
+  const cap = document.createElement('div');
+  cap.className = 'curve-cap';
+  cap.textContent = (res.hardest ? `最难一段 ${fmtTime(res.hardest.startS)}–${fmtTime(res.hardest.endS)}（高亮）· ` : '') + '每 10 秒一段，只看起伏，不等于总星数';
+  box.append(cap);
+  movePlayhead();
+}
+
+function movePlayhead() {
+  const ph = document.getElementById('playhead');
+  if (!ph) return;
+  if (S.live === null || !(S.live >= 0) || S.live > S.curveEnd) { ph.setAttribute('visibility', 'hidden'); return; }
+  const x = (30 + (S.live / S.curveEnd) * (320 - 30 - 8)).toFixed(1);
+  ph.setAttribute('x1', x); ph.setAttribute('x2', x); ph.setAttribute('visibility', 'visible');
 }
 
 render();
