@@ -20,6 +20,10 @@ body { font-family: "Microsoft YaHei UI", "PingFang SC", "Noto Sans SC", system-
 .mod { margin-left: auto; padding: 2px 8px; border-radius: 999px; background: rgba(255, 255, 255, 0.12); font-size: 13px; font-weight: 600; }
 .title { font-size: 13px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .title:empty, .tags:empty { display: none; }
+.dan { display: flex; flex-wrap: wrap; gap: 2px 12px; font-size: 13px; }
+.dan-item { font-weight: 600; }
+.dan-item.muted { color: var(--muted); font-weight: 400; }
+.dan-note { flex-basis: 100%; font-size: 11px; color: var(--muted); }
 .status { font-size: 13px; }
 .tags { display: flex; flex-direction: column; gap: 3px; }
 .tag { font-size: 12px; line-height: 1.35; }

@@ -12,6 +12,7 @@ import {
   validateLadder, ladder, parseAcc, reverseNote, reverseCaption, lnNote, fmtLadderStar, ladderCopyLine,
   LADDER_TITLE, LADDER_CAPTION, LADDER_LABEL, LADDER_UNRELIABLE_NOTE,
 } from './acc-ladder.js';
+import { danEstimate, fmtDanPos, DAN_ESTIMATE_NOTE, DAN_UNRELIABLE_NOTE } from './dan-estimate.js';
 
 const RATES = [1, 0.75, 1.5];
 const MOD_KEY = 'osu-star-web.mod';
@@ -385,6 +386,8 @@ function renderItem(it) {
       side.append(h('span', { class: 'star-alt', title: '整谱按 97% ScoreV2（LN 段位口径，OD 用谱面文件）读出的星数，约定换算，仅供参考',
         text: 'LN 口径 ★ ' + fmtStar(r.sub.v2.star) }));
     }
+    const de = danEstimateRow(r);
+    if (de) extra.push(de);
     if (reasons.length) {
       extra.push(h('div', { class: 'warn' },
         h('span', { class: 'tag', text: '不可靠' }),
@@ -419,6 +422,30 @@ function renderItem(it) {
 
   if (it.status === 'done') extra.push(copyRow(it));
   el.append(side, h('div', { class: 'body' }, info, extra));
+}
+
+// 米 / 面段位：紧跟在谱名下面，和主读数并排
+function danEstimateRow(result) {
+  const data = referencesForModel(state.references, state.ver);
+  if (!data) {
+    return state.referencesPhase === 'loading' ? h('div', { class: 'dan-est muted', text: '正在加载段位参照…' }) : null;
+  }
+  const est = danEstimate(result, data);
+  if (!est) return null;
+  const chip = (x) => {
+    if (!x) return null;
+    const muted = x.muted || est.unreliable;
+    return h('div', { class: 'dan-est-item' + (muted ? ' muted-item' : ''), title: `段位位置 ${fmtDanPos(x.loc, x.group)}` },
+      h('span', { class: 'dan-est-label', text: x.label + '段位' }),
+      h('strong', { class: 'dan-est-text', text: x.text }),
+      x.note ? h('span', { class: 'dan-est-note', text: x.note }) : null);
+  };
+  const notes = [];
+  if (est.unreliable) notes.push(DAN_UNRELIABLE_NOTE);
+  if (est.rateNote) notes.push(est.rateNote);
+  return h('div', { class: 'dan-est', title: DAN_ESTIMATE_NOTE },
+    h('div', { class: 'dan-est-items' }, chip(est.rice), chip(est.face)),
+    notes.length ? h('div', { class: est.unreliable ? 'dan-est-caution' : 'dan-est-sub muted', text: notes.join(' ') }) : null);
 }
 
 function subPanel(result) {
@@ -549,8 +576,9 @@ function copyRow(it) {
   const row = h('div', { class: 'actions' }, btn);
   btn.addEventListener('click', async () => {
     const references = selectDanReferences(it.result, referencesForModel(state.references, state.ver));
+    const dan = danEstimate(it.result, referencesForModel(state.references, state.ver));
     const text = buildCopyText(it.result, it.header, it.name, state.ver, references,
-      state.experimental ? ladderCopyLine(state.ladder, it.result) : null, state.experimental);
+      state.experimental ? ladderCopyLine(state.ladder, it.result) : null, state.experimental, dan);
     const ok = await copyText(text);
     row.querySelector('textarea')?.remove();
     if (ok) {

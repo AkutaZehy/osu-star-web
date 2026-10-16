@@ -11,13 +11,14 @@ const docs = path.join(root, 'docs');
 const outDir = path.join(root, 'dist', 'osu-star-tosu');
 // the worker's import graph (js/worker.js -> engine, reader, ...) and the helper worker
 const JS = ['worker.js', 'sl-worker.js', 'pool.js', 'engine.js', 'reader.js', 'osu.js', 'tokens.js', 'tdist.js', 'features.js',
-  'tree.js', 'md5.js', 'pyutil.js'];
+  'tree.js', 'md5.js', 'pyutil.js', 'dan-estimate.js', 'dan-reference.js'];
 const MODEL = ['reader.json', 'tree.json', 'support.json', 'support-dt.json', 'encoder.onnx'];
 
 fs.rmSync(outDir, { recursive: true, force: true });
 const copy = (from, to) => { fs.mkdirSync(path.dirname(to), { recursive: true }); fs.copyFileSync(from, to); };
 for (const f of fs.readdirSync(path.join(root, 'tosu'))) copy(path.join(root, 'tosu', f), path.join(outDir, f));
 for (const f of JS) copy(path.join(docs, 'js', f), path.join(outDir, 'js', f));
+copy(path.join(docs, 'data', 'dan-references.json'), path.join(outDir, 'data', 'dan-references.json'));
 for (const f of MODEL) copy(path.join(docs, 'model', f), path.join(outDir, 'model', f));
 for (const f of fs.readdirSync(path.join(docs, 'vendor', 'ort'))) copy(path.join(docs, 'vendor', 'ort', f), path.join(outDir, 'vendor', 'ort', f));
 

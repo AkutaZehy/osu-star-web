@@ -1,6 +1,7 @@
 // 页面用到的纯函数（不碰 DOM，Node 里也能直接 import 测试）。
 import { unzipSync } from '../vendor/fflate/fflate.mjs';
 import { danReferenceCopyLines } from './dan-reference.js';
+import { danEstimateCopyLines } from './dan-estimate.js';
 
 export const STAR_NOTE_JACK =
   'jack/chordjack 较多：按 acc 定义，读数通常比段位手感低约 1 段';
@@ -168,7 +169,7 @@ export function jackHint(result) {
 }
 
 /** 「复制读数信息」的多行文本。ver 为 ready 消息的 {version, frozen}。 */
-export function buildCopyText(result, header, fileName, ver, references, ladderLine = null, withSub = true) {
+export function buildCopyText(result, header, fileName, ver, references, ladderLine = null, withSub = true, dan = null) {
   const meta = mergeMeta(header, result);
   const verText = ver && ver.version
     ? `${ver.version}（冻结日期 ${ver.frozen || '未知'}）` : '未知';
@@ -190,6 +191,7 @@ export function buildCopyText(result, header, fileName, ver, references, ladderL
     lines.push('读数不可靠：是');
     rs.forEach((r) => lines.push(`  - ${r}`));
   }
+  if (result && result.ok) lines.push(...danEstimateCopyLines(dan));
   const jh = jackHint(result);
   if (jh) lines.push(`提示：${jh}`);
   if (withSub) for (const r of subRows(result)) lines.push(`${r.label}：${r.star === null ? r.text : fmtStar(r.star) + (r.text ? `（${r.text}）` : '')}`);

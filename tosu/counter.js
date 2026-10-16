@@ -3,6 +3,8 @@
 // outside gameplay, and a computation still running when a play starts is stopped and redone afterwards.
 import { readMods } from './mods.js';
 import { VERSION, FROZEN } from './js/engine.js';
+import { danEstimate } from './js/dan-estimate.js';
+import { validateDanReferences, referencesForModel } from './js/dan-reference.js';
 
 const qs = new URLSearchParams(location.search);
 const HELPERS = Math.max(0, Math.min(8, parseInt(qs.get('helpers') || '0', 10) || 0));
@@ -10,18 +12,29 @@ const WS_URL = qs.get('ws') || `ws://${location.host}/websocket/v2`;
 const FILE_URL = '/files/beatmap/file';
 const STATE_PLAY = 2;            // tosu GameState.play
 const DEBOUNCE_MS = 400;         // song select scrolling: wait until the selection settles
-const CACHE_KEY = `osu-star-tosu|${FROZEN}|`;
+const CACHE_KEY = `osu-star-tosu|${FROZEN}|2|`;   // 2: results keep the 97 % ScoreV2 reading for the LN dan
 const CACHE_MAX = 400;
 
 const $ = id => document.getElementById(id);
 const S = {
   ws: null, worker: null, helpers: [], phase: 'idle',   // idle | loading | ready | error
   playing: null, key: null, info: null, job: null, jobId: 0, timer: null, retries: 0, connected: false,
-  cache: loadCache(),
+  cache: loadCache(), dans: null,
 };
 
 if (qs.get('hint') === '0') $('hint').hidden = true;
 connect();
+loadDanReferences();
+
+// REFORM / LN dan charts read by the same model (small JSON, no computation)
+async function loadDanReferences() {
+  try {
+    const r = await fetch(new URL('./data/dan-references.json', import.meta.url));
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    S.dans = referencesForModel(validateDanReferences(await r.json()), { version: VERSION, frozen: FROZEN });
+  } catch (e) { S.dans = null; }
+  render();
+}
 
 // ---------------------------------------------------------------- tosu websocket
 function connect() {
@@ -161,7 +174,8 @@ function loadCache() {
 }
 function saveResult(key, res) {
   const keep = res.ok
-    ? { ok: true, star: res.star, reliable: res.reliable, thetaFlag: res.thetaFlag, md5: res.md5,
+    ? { ok: true, star: res.star, reliable: res.reliable, thetaFlag: res.thetaFlag, md5: res.md5, rate: res.rate,
+        v2: res.v2 ? { star: res.v2.star } : null, lnFrac: res.lnFrac,
         flags: { sv: res.flags.sv, storyboard: res.flags.storyboard, outOfRangeReasons: res.flags.outOfRangeReasons, jackHeavy: res.flags.jackHeavy } }
     : { ok: false, reason: res.reason, message: res.message };
   S.cache.delete(key);
@@ -179,7 +193,7 @@ function render() {
   $('mod').hidden = !info;
   const starEl = $('star');
   const tags = [];
-  let status = '', star = '–', dim = true;
+  let status = '', star = '–', dim = true, dan = null;
   if (!S.connected) status = '连不上 tosu，重连中…（请确认 tosu 已运行）';
   else if (!info || !info.checksum) status = '等待 tosu 报告谱面…';
   else if (!info.mods.ok) status = info.mods.why;
@@ -195,6 +209,7 @@ function render() {
       tags.push(['bad', '不可靠：' + why.join('、')]);
     }
     if (res.flags.jackHeavy) tags.push(['warn', 'jack 很多：这类谱读数常偏低约一段']);
+    dan = danEstimate(res, S.dans);
   } else if (res) status = res.message;
   else if (S.playing) status = '打歌中：暂停计算，回到选歌界面后再算';
   else if (S.phase === 'error') status = S.error || '模型加载失败';
@@ -202,6 +217,7 @@ function render() {
   else if (S.job) status = `计算中 ${S.job.pct}%`;
   else status = '准备计算…';
   if (info && info.mods.ok && info.mods.notes.length && !dim) tags.push(['info', info.mods.notes.join('；')]);
+  renderDan(dan, info);
   starEl.textContent = star;
   starEl.classList.toggle('dim', dim);
   $('status').textContent = status;
@@ -209,5 +225,28 @@ function render() {
   const box = $('tags');
   box.replaceChildren(...tags.map(([k, t]) => { const s = document.createElement('div'); s.className = 'tag ' + k; s.textContent = t; return s; }));
 }
+// 米 / 面段位: where this reading sits among the REFORM / LN dan charts (same model, same line); not a pass prediction
+function renderDan(est, info) {
+  const box = $('dan');
+  box.replaceChildren();
+  box.hidden = !est;
+  if (!est) return;
+  const chip = (x, name) => {
+    if (!x) return null;
+    const el = document.createElement('span');
+    el.className = 'dan-item' + (x.muted || est.unreliable ? ' muted' : '');
+    el.textContent = `${name} ${x.text}${x.note ? `（${x.note}）` : ''}`;
+    return el;
+  };
+  box.append(...[chip(est.rice, '米段位'), chip(est.face, '面段位')].filter(Boolean));
+  const m = info && info.mods;
+  if (m && m.ok && (m.rate !== 1 || m.hit || m.od !== null)) {
+    const n = document.createElement('div');
+    n.className = 'dan-note';
+    n.textContent = `${m.label}：用这组 Mod 下的读数和 NoMod 段位谱比较`;
+    box.append(n);
+  }
+}
+
 render();
 document.title = `${VERSION} · tosu`;

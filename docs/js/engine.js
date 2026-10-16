@@ -60,7 +60,9 @@ export class Engine {
   // (0.5-2), hit 'hr' / 'ez' (windows / or x 1.4) and odOverride (lazer Difficulty Adjust: replaces the file OD in the
   // windows and the od feature) follow the same rules; reference analysis/web-tosu-r1/score_mods.py. The tree has seen
   // NoMod and 1.5x answers only.
-  async scoreBytes(bytes, { oszHasOsb = false, onProgress = null, withSegments = true, rate = 1, withSub = true, hit = '',
+  // withV2: the whole-chart 97 % ScoreV2 reading (LN dan estimate; ScoreV2 of every action, no re-judging) -> result.v2.
+  // withSub: the experimental items (rice / face / OD8-OD9 re-judge) -> result.sub; implies withV2.
+  async scoreBytes(bytes, { oszHasOsb = false, onProgress = null, withSegments = true, rate = 1, withSub = true, withV2 = true, hit = '',
     odOverride = null } = {}) {
     const t0 = performance.now();
     const text = new TextDecoder('utf-8').decode(bytes);
@@ -69,7 +71,7 @@ export class Engine {
       beatmapSetId: meta.beatmapSetId, md5: md5Hex(bytes), mode: meta.mode, keys: meta.keys };
     try {
       if (!Number.isFinite(rate) || rate < RATE_MIN || rate > RATE_MAX) throw new Error(`rate must be between ${RATE_MIN} and ${RATE_MAX}`);
-      const r = await this.score(text, { oszHasOsb, onProgress, withSegments, rate, withSub, hit, odOverride });
+      const r = await this.score(text, { oszHasOsb, onProgress, withSegments, rate, withSub, withV2: withV2 || withSub, hit, odOverride });
       return { ok: true, ...base, ...r, seconds: (performance.now() - t0) / 1000 };
     } catch (e) {
       const reason = e instanceof ChartError ? e.reason : 'parse_error';
@@ -81,7 +83,7 @@ export class Engine {
     }
   }
 
-  async score(text, { oszHasOsb, onProgress, withSegments, rate, withSub = true, hit = '', odOverride = null }) {
+  async score(text, { oszHasOsb, onProgress, withSegments, rate, withSub = true, withV2 = true, hit = '', odOverride = null }) {
     // 1. hand features (same order as the reference: parse_osu checks mode / keys / note count first); times / rate, file OD
     const pf = parseOsuFeat(text);
     if (odOverride !== null) pf.od = odOverride;
@@ -94,14 +96,15 @@ export class Engine {
     const tk = tokensFromNotes(notes, rate);
     const usePool = this.pool && tk.nActions >= POOL_MIN_ACTIONS;
     const { acc, v1a, lnV2, tapV2, ls } = await this.reader.perAction(tk, od, onProgress ? p => onProgress('encode', p) : null,
-      usePool ? this.pool : null, rate, withSub, hit);
+      usePool ? this.pool : null, rate, withSub || withV2, hit);
     const { theta, flag } = this.reader.theta(acc);
     // 3. tree
     const row = this.tree.columns.map(c => (c === 's29' ? theta : F[c]));
     const reading = predictTree(this.tree, row);
     const star = this.tree.star_scale.a + this.tree.star_scale.b * reading;
-    // 4. rice / face items and the OD8 (OD9) reading
-    const sub = withSub ? await this.subReadings({ tk, od, v1a, lnV2, tapV2, ls, theta, flag, star, rate, hit, pool: usePool ? this.pool : null }) : null;
+    // 4. whole-chart 97 % ScoreV2 reading (LN dan estimate), then the experimental rice / face items and the OD8 (OD9) reading
+    const v2 = withSub || withV2 ? this.v2Reading({ tk, lnV2, tapV2, theta, star }) : null;
+    const sub = withSub ? await this.subReadings({ tk, od, v1a, lnV2, tapV2, ls, theta, flag, star, rate, hit, pool: usePool ? this.pool : null, v2 }) : null;
     // flags
     const sv = svFracSafe(text);
     const sb = sbLines(text);
@@ -133,12 +136,25 @@ export class Engine {
     let tmax = 0;
     for (const n of notes) tmax = Math.max(tmax, n[1], n[0]);
     return { rate, hit, odOverride, star, reading, theta, thetaFlag: flag, nNotes: tk.nNotes, nActions: tk.nActions, od, durationS: tmax / 1000 / rate,
-      features: F, acc: Array.from(acc), reliable: !(flags.sv || flags.storyboard || flags.outOfRange), flags, segments, hardest, sub };
+      features: F, acc: Array.from(acc), reliable: !(flags.sv || flags.storyboard || flags.outOfRange), flags, segments, hardest, v2, sub };
   }
 
   // research repo analysis/rice-ln-od-r1/rlo_core.readings: rice = taps (not LN head, not release) on the ScoreV1 curve at 96 %;
   // face = LN heads + tails on the ScoreV2 curve at 97 %; OD = whole chart re-judged at OD8 (OD9 from 6.3 stars) at 96 % ScoreV1
-  async subReadings({ tk, od, v1a, lnV2, tapV2, ls, theta, flag, star, rate, hit = '', pool }) {
+  // LN line: the whole chart (taps + LN heads + tails) on the ScoreV2 curve at 97 %, file OD (ps_engine acc_v2 / rlo_core theta_v2_all)
+  v2Reading({ tk, lnV2, tapV2, theta, star }) {
+    const P = this.reader.P, A = tk.nActions, L = tk.lnH.length, b = this.tree.star_scale.b;
+    const accV2 = new Float64Array(P);
+    for (let p = 0; p < P; p++) {
+      let s = tapV2[p];
+      for (let j = 0; j < 2 * L; j++) s += lnV2[p * 2 * L + j];
+      accV2[p] = s / A;
+    }
+    const { theta: v2Theta, flag: v2Flag } = this.reader.theta(accV2, FACE_LINE);
+    return { theta: v2Theta, flag: v2Flag, star: subStar(star, theta, v2Theta, b) };
+  }
+
+  async subReadings({ tk, od, v1a, lnV2, tapV2, ls, theta, flag, star, rate, hit = '', pool, v2 = null }) {
     const t0 = performance.now();
     const P = this.reader.P, A = tk.nActions, L = tk.lnH.length, b = this.tree.star_scale.b;
     const head = new Uint8Array(A);
@@ -168,15 +184,7 @@ export class Engine {
       }
       return acc;
     }, FACE_LINE);
-    // LN line: the whole chart (taps + LN heads + tails) on the ScoreV2 curve at 97 %, file OD (ps_engine acc_v2 / rlo_core theta_v2_all)
-    const accV2 = new Float64Array(P);
-    for (let p = 0; p < P; p++) {
-      let s = tapV2[p];
-      for (let j = 0; j < 2 * L; j++) s += lnV2[p * 2 * L + j];
-      accV2[p] = s / A;
-    }
-    const { theta: v2Theta, flag: v2Flag } = this.reader.theta(accV2, FACE_LINE);
-    const v2 = { theta: v2Theta, flag: v2Flag, star: subStar(star, theta, v2Theta, b) };
+    if (!v2) v2 = this.v2Reading({ tk, lnV2, tapV2, theta, star });
     const odUsed = star >= OD9_FROM ? 9 : 8;
     let odTheta = theta, odFlag = flag;
     if (odUsed !== od) ({ theta: odTheta, flag: odFlag } = this.reader.theta(await this.reader.accAtOd(ls, tk, odUsed, pool, rate, hit)));
