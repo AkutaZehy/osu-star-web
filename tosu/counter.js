@@ -6,6 +6,8 @@ import { VERSION, FROZEN } from './js/engine.js';
 import { danEstimate } from './js/dan-estimate.js';
 import { validateDanReferences, referencesForModel } from './js/dan-reference.js';
 import { buildSegmentsSvg, fmtTime } from './js/ui-lib.js';
+import { validateLadder } from './js/acc-ladder.js';
+import { scoreV1Acc, playLevel, usableAcc, estimateLevel, expectedAcc, fmtExpectedAcc } from './player.js';
 
 const qs = new URLSearchParams(location.search);
 const clampHelpers = v => Math.max(0, Math.min(8, Math.round(Number(v)) || 0));
@@ -15,6 +17,10 @@ const COUNTER_PATH = window.COUNTER_PATH || decodeURI(location.pathname.split('/
 const CMD_URL = `ws://${location.host}/websocket/commands?l=${encodeURI(COUNTER_PATH)}`;
 const FILE_URL = '/files/beatmap/file';
 const STATE_PLAY = 2;            // tosu GameState.play
+const STATE_RESULTS = 7;         // tosu GameState.resultScreen
+const RESULTS_SETTLE_MS = 1500;  // read the results screen once tosu has filled it in
+const HISTORY_KEY = 'osu-star-tosu|plays|1';
+const HISTORY_MAX = 50;
 const DEBOUNCE_MS = 400;         // song select scrolling: wait until the selection settles
 const CACHE_KEY = `osu-star-tosu|${FROZEN}|3|`;   // 3: results keep the 97 % ScoreV2 reading and the segment curve
 const CACHE_MAX = 300;
@@ -27,13 +33,16 @@ const S = {
   cache: loadCache(), dans: null,
   // settings.json (tosu settings page); the URL parameters ?hint=0 / ?helpers=N only set the starting values
   settings: { hideWhilePlaying: false, bottom: qs.get('hint') === '0' ? BOTTOM.none : qs.get('curve') === '1' ? BOTTOM.curve : BOTTOM.hint,
-    helpers: clampHelpers(qs.get('helpers') || 0) },
+    helpers: clampHelpers(qs.get('helpers') || 0), playerLevel: true, playerWindow: 5 },
   curveKey: null, curveEnd: 0, live: null,
+  // finished plays (newest first) for the player level; state / results bookkeeping
+  history: loadHistory(), ladder: null, state: null, resultsMsg: null, resultsTimer: null, lastPlay: null,
 };
 
 connect();
 connectSettings();
 loadDanReferences();
+loadLadder();
 
 // ---------------------------------------------------------------- tosu settings (Settings API, tosu >= 2.6)
 // getSettings answers with the saved values (defaults from settings.json filled in); updateSettings arrives when the
@@ -58,6 +67,8 @@ function applySettings(v) {
   if ('hideWhilePlaying' in v) S.settings.hideWhilePlaying = bool(v.hideWhilePlaying);
   if ('bottomPanel' in v && Object.values(BOTTOM).includes(v.bottomPanel)) S.settings.bottom = v.bottomPanel;
   if ('helpers' in v) S.settings.helpers = clampHelpers(v.helpers);
+  if ('playerLevel' in v) S.settings.playerLevel = bool(v.playerLevel);
+  if ('playerWindow' in v) S.settings.playerWindow = Math.max(1, Math.min(20, Math.round(Number(v.playerWindow)) || 5));
   render();
 }
 
@@ -68,6 +79,16 @@ async function loadDanReferences() {
     if (!r.ok) throw new Error(`HTTP ${r.status}`);
     S.dans = referencesForModel(validateDanReferences(await r.json()), { version: VERSION, frozen: FROZEN });
   } catch (e) { S.dans = null; }
+  render();
+}
+
+// acc ladder of the web page ("达成水平"), read backwards for the player level
+async function loadLadder() {
+  try {
+    const r = await fetch(new URL('./model/acc-ladder.json', import.meta.url));
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    S.ladder = validateLadder(await r.json());
+  } catch (e) { S.ladder = null; }
   render();
 }
 
@@ -100,6 +121,7 @@ function onTosu(d) {
   const t = bm.time || {};
   S.live = playing && Number.isFinite(t.live) && Number.isFinite(t.firstObject) && mods.ok ? (t.live - t.firstObject) / mods.rate / 1000 : null;
   movePlayhead();
+  trackResults(d, info);
   const wasPlaying = S.playing;
   S.playing = playing;
   if (playing && wasPlaying !== true) enterPlay();
@@ -202,6 +224,91 @@ function startWorker() {
   w.postMessage({ type: 'init', ports }, ports);
 }
 
+// ---------------------------------------------------------------- finished plays
+// A play counts when the game goes from playing straight to the results screen (a pass, or NF). Watching someone
+// else's replay also ends on the results screen, so the results' player name must match the logged-in profile.
+// tosu fills the results in shortly after the state changes, so the record is taken RESULTS_SETTLE_MS later (or when
+// the screen is left earlier) from the latest message.
+function trackResults(d, info) {
+  const st = d.state ? d.state.number : null;
+  if (st === STATE_RESULTS) {
+    S.resultsMsg = { d, info };
+    if (S.state === STATE_PLAY) {
+      clearTimeout(S.resultsTimer);
+      S.resultsTimer = setTimeout(takeResults, RESULTS_SETTLE_MS);
+    }
+  } else if (S.state === STATE_RESULTS) {
+    if (S.resultsTimer) { clearTimeout(S.resultsTimer); takeResults(); }
+    S.lastPlay = null;
+  }
+  S.state = st;
+}
+
+function takeResults() {
+  S.resultsTimer = null;
+  const m = S.resultsMsg;
+  if (!m) return;
+  const { d, info } = m;
+  const rs = d.resultsScreen || {};
+  const me = d.profile && d.profile.name;
+  if (me && rs.playerName && rs.playerName !== me) return;
+  if (rs.mode && rs.mode.number !== 3) return;
+  const mods = readMods(rs.mods || (d.play && d.play.mods));
+  const acc = scoreV1Acc(rs.hits);
+  if (!info.checksum || !mods.ok || acc === null) return;
+  const rec = { at: Date.now(), checksum: info.checksum, title: info.title, version: info.version, key: `${info.checksum}#${mods.key}`,
+    rate: mods.rate, label: mods.label, acc: Math.round(acc * 100) / 100, created: rs.createdAt || '', score: rs.score || 0 };
+  const last = S.history[0];
+  if (last && last.key === rec.key && last.created === rec.created && last.score === rec.score && last.acc === rec.acc) { S.lastPlay = last; return render(); }
+  S.history.unshift(rec);
+  S.history.length = Math.min(S.history.length, HISTORY_MAX);
+  try { localStorage.setItem(HISTORY_KEY, JSON.stringify(S.history)); } catch (e) { /* no storage: this session only */ }
+  S.lastPlay = rec;
+  render();
+}
+
+function loadHistory() {
+  try {
+    const h = JSON.parse(localStorage.getItem(HISTORY_KEY) || '[]');
+    return Array.isArray(h) ? h : [];
+  } catch (e) { return []; }
+}
+
+// the star reading of a recorded play comes from the reading cache (map + mods), filled at song select or after the play
+function playsWithStars() {
+  return S.history.map(p => {
+    const c = S.cache.get(p.key);
+    return { ...p, star: c && c.ok ? c.star : null, reliable: c && c.ok ? c.reliable : null };
+  });
+}
+
+function renderPlayer(res) {
+  const box = $('player');
+  const P = S.ladder;
+  box.replaceChildren();
+  box.hidden = !S.settings.playerLevel || !P;
+  if (box.hidden) return;
+  const line = (text, cls = '') => { const el = document.createElement('div'); el.className = 'pl-line ' + cls; el.textContent = text; box.append(el); };
+  const plays = playsWithStars();
+  if (S.state === STATE_RESULTS && S.lastPlay) {
+    const p = plays.find(x => x.at === S.lastPlay.at) || S.lastPlay;
+    if (!Number.isFinite(p.star)) line(`这局 ${p.acc.toFixed(2)}%（ScoreV1）· 等星数算好后换算水平`, 'muted');
+    else if (!usableAcc(P, p.acc)) line(`这局 ${p.acc.toFixed(2)}%（ScoreV1）· acc 太高或太低，不用来估水平`, 'muted');
+    else line(`这局 ${p.acc.toFixed(2)}%（ScoreV1）≈ ${playLevel(P, p.star, p.acc, p.rate).toFixed(2)} 星水平${p.reliable === false ? '（星数不可靠，不计入）' : ''}`);
+  }
+  const est = estimateLevel(P, plays, S.settings.playerWindow);
+  if (est.level === null) {
+    line(`我的水平：已有 ${est.used.length}/${est.needed} 局可用成绩（完整打完的 4K 谱，acc 85%–99%）`, 'muted');
+    return;
+  }
+  const range = est.used.length > 1 ? `，单局 ${est.lo.toFixed(1)}–${est.hi.toFixed(1)}` : '';
+  line(`我的水平 ≈ ${est.level.toFixed(2)} 星（近 ${est.used.length} 局${range}）· 实验`);
+  if (res && res.ok) {
+    const rate = S.info && S.info.mods.ok ? S.info.mods.rate : 1;
+    line(`这张谱预计 acc ≈ ${fmtExpectedAcc(P, expectedAcc(P, est.level, res.star, rate))}（ScoreV1）`, 'strong');
+  }
+}
+
 // ---------------------------------------------------------------- cache (per browser, survives restarts)
 function loadCache() {
   const m = new Map();
@@ -262,6 +369,7 @@ function render() {
   else status = '准备计算…';
   if (info && info.mods.ok && info.mods.notes.length && !dim) tags.push(['info', info.mods.notes.join('；')]);
   renderDan(dan, info);
+  renderPlayer(res && res.ok ? res : null);
   renderCurve(res && res.ok && S.settings.bottom === BOTTOM.curve ? res : null);
   starEl.textContent = star;
   starEl.classList.toggle('dim', dim);

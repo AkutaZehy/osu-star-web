@@ -19,6 +19,20 @@
     "value": "使用提示"
   },
   {
+    "uniqueID": "playerLevel",
+    "type": "checkbox",
+    "title": "显示我的水平与预计 acc（实验）",
+    "description": "插件会记下每次完整打完（进入结算界面）的 4K 谱成绩，用最近几局估出你的水平（和总星数同一刻度），再估你在当前谱面上的 acc（stable ScoreV1）。只记打谱时插件开着的局，不记失败、退出、别人的回放。没有经过检验，只作参考。",
+    "value": true
+  },
+  {
+    "uniqueID": "playerWindow",
+    "type": "number",
+    "title": "用最近几局估水平",
+    "description": "默认 5 局（1–20）。只算 acc 在 85%–99% 之间、星数读数可靠的局。局数越多越稳，但跟不上进步。",
+    "value": 5
+  },
+  {
     "uniqueID": "helpers",
     "type": "number",
     "title": "辅助线程数",

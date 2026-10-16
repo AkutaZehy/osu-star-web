@@ -11,7 +11,8 @@
     "test:items": "node tests/rice-ln-od.mjs",
     "test:mods": "node tests/compare_mods.mjs",
     "build:tosu": "node tools/build-tosu.mjs",
-    "test:dan": "node --test tests/dan-estimate.mjs"
+    "test:dan": "node --test tests/dan-estimate.mjs",
+    "test:tosu": "node tools/build-tosu.mjs && node --test tests/tosu-player.mjs"
   },
   "dependencies": {
     "fflate": "0.8.3",

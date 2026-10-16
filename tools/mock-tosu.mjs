@@ -2,7 +2,8 @@
 // /files/beatmap/file and a v2 websocket at /websocket/v2 that pushes the mock state every 300 ms.
 //   node tools/mock-tosu.mjs [port]      default 24050
 // Drive it with GET /mock?file=<path to .osu>&state=<tosu GameState number>&mods=<JSON array of {acronym, settings}>
-// (each parameter optional; state 5 = song select, 2 = playing; time=<ms> sets beatmap.time.live). GET /mock returns the current mock state.
+// (each parameter optional; state 5 = song select, 2 = playing, 7 = results; time=<ms> sets beatmap.time.live;
+// results=<JSON> overrides resultsScreen fields such as hits / playerName / createdAt; profile=<name> the logged-in user). GET /mock returns the current mock state.
 // /websocket/commands answers getSettings with the counter's settings.json defaults merged with the mock values;
 // GET /mock?settings=<JSON object> changes the values and pushes updateSettings, as tosu's settings page does.
 import http from 'node:http';
@@ -18,7 +19,8 @@ const MIME = {
   '.mjs': 'text/javascript; charset=utf-8', '.json': 'application/json; charset=utf-8', '.wasm': 'application/wasm; charset=utf-8',
   '.txt': 'text/plain; charset=utf-8',
 };
-const mock = { file: '', state: 5, mods: [], checksum: '', meta: {}, settings: {}, live: 0, firstObject: 0 };
+const mock = { file: '', state: 5, mods: [], checksum: '', meta: {}, settings: {}, live: 0, firstObject: 0,
+  results: {}, profile: 'mock player' };
 const cmdClients = new Set();
 
 function setFile(f) {
@@ -38,6 +40,9 @@ function v2() {
   const HT = mock.mods.some(m => m.acronym === 'HT' || m.acronym === 'DC');
   const sc = (mock.mods.find(m => m.settings && typeof m.settings.speed_change === 'number') || {}).settings;
   return {
+    profile: { name: mock.profile },
+    resultsScreen: { playerName: mock.profile, mode: { number: 3, name: 'mania' }, score: 0, createdAt: '', hits: {},
+      mods: { array: mock.mods, rate: sc ? sc.speed_change : DT ? 1.5 : HT ? 0.75 : 1 }, ...mock.results },
     client: 'lazer', state: { number: mock.state, name: mock.state === 2 ? 'play' : 'selectPlay' },
     beatmap: { checksum: mock.checksum, artist: mock.meta.artist, title: mock.meta.title, version: mock.meta.version,
       mapper: mock.meta.mapper, mode: { number: mock.meta.mode, name: '' }, time: { live: mock.live, firstObject: mock.firstObject } },
@@ -55,6 +60,8 @@ const server = http.createServer((req, res) => {
       if (u.searchParams.has('state')) mock.state = Number(u.searchParams.get('state'));
       if (u.searchParams.has('mods')) mock.mods = JSON.parse(u.searchParams.get('mods'));
       if (u.searchParams.has('time')) mock.live = Number(u.searchParams.get('time'));
+      if (u.searchParams.has('results')) mock.results = JSON.parse(u.searchParams.get('results'));
+      if (u.searchParams.has('profile')) mock.profile = u.searchParams.get('profile');
       if (u.searchParams.has('settings')) {
         Object.assign(mock.settings, JSON.parse(u.searchParams.get('settings')));
         const f = frame(JSON.stringify({ command: 'updateSettings', message: settingsValues() }));

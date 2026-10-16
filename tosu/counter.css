@@ -24,6 +24,9 @@ body { font-family: "Microsoft YaHei UI", "PingFang SC", "Noto Sans SC", system-
 .dan-item { font-weight: 600; }
 .dan-item.muted { color: var(--muted); font-weight: 400; }
 .dan-note { flex-basis: 100%; font-size: 11px; color: var(--muted); }
+.player { display: flex; flex-direction: column; gap: 1px; font-size: 12px; }
+.pl-line.muted { color: var(--muted); }
+.pl-line.strong { font-size: 13px; font-weight: 600; color: var(--info); }
 .status { font-size: 13px; }
 .tags { display: flex; flex-direction: column; gap: 3px; }
 .tag { font-size: 12px; line-height: 1.35; }
