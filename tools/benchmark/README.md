@@ -19,3 +19,7 @@
 依赖：Node + 仓库根目录的 `onnxruntime-web`（`npm i`）；报告脚本只用 Python 3 标准库。
 打分遵守 benchmark `docs/runner.md` 的约定（rate 固定 1.0、名字匹配 exact → normalized → Name(...)、
 只覆盖 got/delta/deltaAbs）；映射规则（REFORM 3rd 替代锚、jack 修正曲线）见 `map.mjs` 头部注释。
+
+本目录 `results/` 存本次 P1H 运行的三份输出副本（`SkyP1H.csv` / `SkyP1H-jackBuffed.csv` /
+`TreeStar-rf3.csv`，即 `../tree-star-benchmark-report.html` 报告所依据的完整数据）；同一套文件已注册在
+VSRG-DanEstimation-Benchmark 仓库的 `results/` 下。

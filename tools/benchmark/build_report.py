@@ -303,7 +303,7 @@ body = f"""
 <tr><th>name</th><th>pattern</th><th>subPattern</th><th>expected</th><th>got(P1H)</th><th>Δ</th><th>got(Buffed)</th><th>Δ</th><th>jackShare</th><th>标记</th></tr>
 <tbody id="rows"></tbody>
 </table>
-<div class="small">完整 CSV 已注册进 <code>VSRG-DanEstimation-Benchmark-main/results/</code>（SkyP1H.csv / SkyP1H-jackBuffed.csv + index.json）；本地起 HTTP 服务打开该仓库 index.html 可与既有算法并排对比。TreeStar-rf3.csv 保留在磁盘、未注册。</div>
+<div class="small">完整 CSV 随本仓库提供：<code>tools/benchmark/results/</code>（SkyP1H.csv / SkyP1H-jackBuffed.csv / TreeStar-rf3.csv）；同一套文件已注册进 <code>VSRG-DanEstimation-Benchmark-main/results/</code>（+ index.json），本地起 HTTP 服务打开该仓库 index.html 可与既有算法并排对比。</div>
 </main>
 """
 
