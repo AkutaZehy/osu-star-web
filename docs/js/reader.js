@@ -19,22 +19,32 @@ const GX = GL_X.map(f32), GW = GL_W.map(f32);
 
 // osu_diff.stable_judgement.hit_windows(od, mods): MAX, 300, 200, 100, 50, earliest (integer map-time windows).
 // rate 1.5 = DT bit (x 1.5), 0.75 = HT bit (x 0.75), applied in double before truncation as stable does.
+// Other constant rates (lazer speed_change, 0.5-2) use the same map-time scaling; hit 'hr' / 'ez' divides / multiplies by 1.4
+// before the rate (stable order). OD up to 11 is accepted for lazer Difficulty Adjust with extended limits.
 export const RATES = [1, 0.75, 1.5];
-export function v1Windows(od, rate = 1) {
-  if (!Number.isFinite(od) || od < 0 || od > 10) throw new Error('Stable OD must be finite and between 0 and 10');
-  if (!RATES.includes(rate)) throw new Error('rate must be 1, 0.75 or 1.5');
+export const RATE_MIN = 0.5, RATE_MAX = 2;
+export function checkJudge(od, rate, hit) {
+  if (!Number.isFinite(od) || od < 0 || od > 11) throw new Error('OD must be finite and between 0 and 11');
+  if (!Number.isFinite(rate) || rate < RATE_MIN || rate > RATE_MAX) throw new Error(`rate must be between ${RATE_MIN} and ${RATE_MAX}`);
+  if (hit !== '' && hit !== 'hr' && hit !== 'ez') throw new Error("hit must be '', 'hr' or 'ez'");
+}
+function scaleWindow(v, rate, hit) {
+  if (hit === 'hr') v /= 1.4; else if (hit === 'ez') v *= 1.4;
+  return v * rate;
+}
+export function v1Windows(od, rate = 1, hit = '') {
+  checkJudge(od, rate, hit);
   const diff = f32(10 - f32(od));
-  return [16, ...[34, 67, 97, 121, 158].map(b => f32(b + f32(3 * diff)))].map(v => Math.trunc(v * rate));
+  return [16, ...[34, 67, 97, 121, 158].map(b => f32(b + f32(3 * diff)))].map(v => Math.trunc(scaleWindow(v, rate, hit)));
 }
 
 // osu_diff.stable_scorev2.hit_windows(od, SCORE_V2 | mod bit): float32 OD, double arithmetic, the earliest window unscaled
-export function v2Windows(od, rate = 1) {
-  if (!Number.isFinite(od) || od < 0 || od > 10) throw new Error('Stable OD must be finite and between 0 and 10');
-  if (!RATES.includes(rate)) throw new Error('rate must be 1, 0.75 or 1.5');
+export function v2Windows(od, rate = 1, hit = '') {
+  checkJudge(od, rate, hit);
   const d = f32(od);
   return V2_RANGES.map(([lo, mid, hi], i) => {
     let v = d > 5 ? mid + (hi - mid) * (d - 5) / 5 : d < 5 ? mid - (mid - lo) * (5 - d) / 5 : mid;
-    if (i < 5) v *= rate;
+    if (i < 5) v = scaleWindow(v, rate, hit);
     return Math.trunc(v);
   });
 }
@@ -115,9 +125,9 @@ export class Reader {
 
   // ScoreV2 scores of the long-note heads and tails of one orientation, added (x 0.5) into V[p * 2L + j] (j < L heads, then
   // tails): ps_engine.per_action v2 restricted to the LN actions
-  lnV2Accumulate(l, comp, lnH, lnT, od, rate, V) {
+  lnV2Accumulate(l, comp, lnH, lnT, od, rate, V, hit = '') {
     const L = lnH.length;
-    const w = v2Windows(od, rate);
+    const w = v2Windows(od, rate, hit);
     const W = w.slice(0, 5).map(v => f32(v + 0.5));
     const C = this.v2TailConstants(w);
     for (let p = 0; p < this.P; p++) {
@@ -133,8 +143,8 @@ export class Reader {
 
   // ScoreV2 head scores of the taps (not LN heads, not releases) of one orientation, summed per level into V[p] (x 0.5):
   // ps_engine.per_action v2 restricted to the taps; with lnV2 this gives the whole-chart acc_v2 (LN line, 97 % ScoreV2)
-  tapV2Accumulate(l, comp, head, od, rate, V) {
-    const w = v2Windows(od, rate);
+  tapV2Accumulate(l, comp, head, od, rate, V, hit = '') {
+    const w = v2Windows(od, rate, hit);
     const W = w.slice(0, 5).map(v => f32(v + 0.5));
     const A = comp.length;
     for (let p = 0; p < this.P; p++) {
@@ -260,9 +270,9 @@ export class Reader {
 
   // per-action v1 scores (float32) for profiles p0..p1-1 of one orientation: S[(p-p0)*A + a].
   // rate != 1 (analysis/web-rate-r1, = dt-crowd r1 ps_rate): scored in map time, mu and sigma x rate against the mod windows
-  secondLayerRange(l, comp, lnH, lnT, od, p0, p1, rate = 1) {
+  secondLayerRange(l, comp, lnH, lnT, od, p0, p1, rate = 1, hit = '') {
     const A = comp.length, T = this.terms;
-    const w = v1Windows(od, rate);
+    const w = v1Windows(od, rate, hit);
     const W = w.slice(0, 5).map(v => f32(v + 0.5));
     const LC = this.lnConstants(w);
     const isLnHead = new Uint8Array(A);
@@ -300,23 +310,23 @@ export class Reader {
     for (let i = 0; i < S.length; i++) v1a[o + i] += 0.5 * S[i];
   }
 
-  // all profiles of one orientation, locally or split over a helper pool (pool.run(l, comp, lnH, lnT, od, p0, p1, rate) -> S)
-  async secondLayer(l, tk, od, v1a, pool, rate = 1) {
+  // all profiles of one orientation, locally or split over a helper pool (pool.run(l, comp, lnH, lnT, od, p0, p1, rate, hit) -> S)
+  async secondLayer(l, tk, od, v1a, pool, rate = 1, hit = '') {
     const A = tk.nActions, P = this.P;
     if (!pool || !pool.size) {
-      Reader.accumulate(v1a, this.secondLayerRange(l, tk.comp, tk.lnH, tk.lnT, od, 0, P, rate), 0, A);
+      Reader.accumulate(v1a, this.secondLayerRange(l, tk.comp, tk.lnH, tk.lnT, od, 0, P, rate, hit), 0, A);
       return;
     }
     const k = Math.min(pool.size, P);
     const parts = [];
     for (let i = 0; i < k; i++) {
       const p0 = Math.floor(i * P / k), p1 = Math.floor((i + 1) * P / k);
-      parts.push(pool.run(l, tk.comp, tk.lnH, tk.lnT, od, p0, p1, rate).then(S => ({ S, p0 })));
+      parts.push(pool.run(l, tk.comp, tk.lnH, tk.lnT, od, p0, p1, rate, hit).then(S => ({ S, p0 })));
     }
     for (const { S, p0 } of await Promise.all(parts)) Reader.accumulate(v1a, S, p0, A);
   }
 
-  async perAction(tk, od, onProgress, pool = null, rate = 1, withLn = true) {
+  async perAction(tk, od, onProgress, pool = null, rate = 1, withLn = true, hit = '') {
     const A = tk.nActions;
     const { token_mean: mt, token_scale: st } = this.R;
     const xs = new Float32Array(A * 17);
@@ -337,19 +347,19 @@ export class Reader {
     if (pool && pool.size) {
       // overlap: helpers score orientation 0 while the encoder runs orientation 1
       const l0 = await this.encode(xs, A, prog, 0, 30);
-      const s0 = this.secondLayer(l0, tk, od, v1a, pool, rate);
-      if (withLn) { this.lnV2Accumulate(l0, tk.comp, tk.lnH, tk.lnT, od, rate, lnV2); this.tapV2Accumulate(l0, tk.comp, head, od, rate, tapV2); }
+      const s0 = this.secondLayer(l0, tk, od, v1a, pool, rate, hit);
+      if (withLn) { this.lnV2Accumulate(l0, tk.comp, tk.lnH, tk.lnT, od, rate, lnV2, hit); this.tapV2Accumulate(l0, tk.comp, head, od, rate, tapV2, hit); }
       const l1 = await this.encode(xm, A, prog, 30, 30);
       await s0; prog(75);
-      const s1 = this.secondLayer(l1, tk, od, v1a, pool, rate);
-      if (withLn) { this.lnV2Accumulate(l1, tk.comp, tk.lnH, tk.lnT, od, rate, lnV2); this.tapV2Accumulate(l1, tk.comp, head, od, rate, tapV2); }
+      const s1 = this.secondLayer(l1, tk, od, v1a, pool, rate, hit);
+      if (withLn) { this.lnV2Accumulate(l1, tk.comp, tk.lnH, tk.lnT, od, rate, lnV2, hit); this.tapV2Accumulate(l1, tk.comp, head, od, rate, tapV2, hit); }
       await s1; prog(95);
       ls.push(l0, l1);
     } else {
       for (let mirror = 0; mirror < 2; mirror++) {
         const l = await this.encode(mirror ? xm : xs, A, prog, mirror * 45, 40);
-        await this.secondLayer(l, tk, od, v1a, null, rate);
-        if (withLn) { this.lnV2Accumulate(l, tk.comp, tk.lnH, tk.lnT, od, rate, lnV2); this.tapV2Accumulate(l, tk.comp, head, od, rate, tapV2); }
+        await this.secondLayer(l, tk, od, v1a, null, rate, hit);
+        if (withLn) { this.lnV2Accumulate(l, tk.comp, tk.lnH, tk.lnT, od, rate, lnV2, hit); this.tapV2Accumulate(l, tk.comp, head, od, rate, tapV2, hit); }
         ls.push(l);
         prog(mirror * 45 + 45);
       }
@@ -364,10 +374,10 @@ export class Reader {
   }
 
   // whole-chart ScoreV1 accuracy curve re-judged at another OD, reusing the encoder outputs ls (OD only enters the windows)
-  async accAtOd(ls, tk, od, pool = null, rate = 1) {
+  async accAtOd(ls, tk, od, pool = null, rate = 1, hit = '') {
     const A = tk.nActions;
     const v = new Float64Array(this.P * A);
-    for (const l of ls) await this.secondLayer(l, tk, od, v, pool && pool.size ? pool : null, rate);
+    for (const l of ls) await this.secondLayer(l, tk, od, v, pool && pool.size ? pool : null, rate, hit);
     const acc = new Float64Array(this.P);
     for (let p = 0; p < this.P; p++) {
       let s = 0;

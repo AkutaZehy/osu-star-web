@@ -5,7 +5,7 @@ import { tokensFromNotes } from './tokens.js';
 import { buildTable } from './tdist.js';
 import { prepareFeatureNotes, feats } from './features.js';
 import { predictTree } from './tree.js';
-import { Reader, RATES } from './reader.js';
+import { Reader, RATE_MIN, RATE_MAX } from './reader.js';
 import { md5Hex } from './md5.js';
 
 export const VERSION = '树星数 v1 (P1h)';
@@ -56,16 +56,20 @@ export class Engine {
     Object.assign(this, { R, tree, support, reader, loadMs });
   }
 
-  // rate: 1 (NoMod), 0.75 (HT) or 1.5 (DT); see analysis/web-rate-r1/score_rate.py for the reference
-  async scoreBytes(bytes, { oszHasOsb = false, onProgress = null, withSegments = true, rate = 1, withSub = true } = {}) {
+  // rate: 1 (NoMod), 0.75 (HT) or 1.5 (DT); see analysis/web-rate-r1/score_rate.py for the reference. Other constant rates
+  // (0.5-2), hit 'hr' / 'ez' (windows / or x 1.4) and odOverride (lazer Difficulty Adjust: replaces the file OD in the
+  // windows and the od feature) follow the same rules; reference analysis/web-tosu-r1/score_mods.py. The tree has seen
+  // NoMod and 1.5x answers only.
+  async scoreBytes(bytes, { oszHasOsb = false, onProgress = null, withSegments = true, rate = 1, withSub = true, hit = '',
+    odOverride = null } = {}) {
     const t0 = performance.now();
     const text = new TextDecoder('utf-8').decode(bytes);
     const meta = metadata(text);
     const base = { title: meta.title, artist: meta.artist, version: meta.version, creator: meta.creator, beatmapId: meta.beatmapId,
       beatmapSetId: meta.beatmapSetId, md5: md5Hex(bytes), mode: meta.mode, keys: meta.keys };
     try {
-      if (!RATES.includes(rate)) throw new Error('rate must be 1, 0.75 or 1.5');
-      const r = await this.score(text, { oszHasOsb, onProgress, withSegments, rate, withSub });
+      if (!Number.isFinite(rate) || rate < RATE_MIN || rate > RATE_MAX) throw new Error(`rate must be between ${RATE_MIN} and ${RATE_MAX}`);
+      const r = await this.score(text, { oszHasOsb, onProgress, withSegments, rate, withSub, hit, odOverride });
       return { ok: true, ...base, ...r, seconds: (performance.now() - t0) / 1000 };
     } catch (e) {
       const reason = e instanceof ChartError ? e.reason : 'parse_error';
@@ -77,32 +81,36 @@ export class Engine {
     }
   }
 
-  async score(text, { oszHasOsb, onProgress, withSegments, rate, withSub = true }) {
+  async score(text, { oszHasOsb, onProgress, withSegments, rate, withSub = true, hit = '', odOverride = null }) {
     // 1. hand features (same order as the reference: parse_osu checks mode / keys / note count first); times / rate, file OD
     const pf = parseOsuFeat(text);
+    if (odOverride !== null) pf.od = odOverride;
     const fn = prepareFeatureNotes(pf);
     if (rate !== 1) for (let i = 0; i < fn.s.length; i++) { fn.s[i] /= rate; fn.e[i] = fn.e[i] >= 0 ? fn.e[i] / rate : -1; }
     const F = feats(fn.s, fn.c, fn.e, fn.od);
     // 2. theta* from the encoder + reference-path second layer
-    const { notes, od } = loadChart(text);
+    const chart = loadChart(text);
+    const notes = chart.notes, od = odOverride !== null ? odOverride : chart.od;
     const tk = tokensFromNotes(notes, rate);
     const usePool = this.pool && tk.nActions >= POOL_MIN_ACTIONS;
     const { acc, v1a, lnV2, tapV2, ls } = await this.reader.perAction(tk, od, onProgress ? p => onProgress('encode', p) : null,
-      usePool ? this.pool : null, rate, withSub);
+      usePool ? this.pool : null, rate, withSub, hit);
     const { theta, flag } = this.reader.theta(acc);
     // 3. tree
     const row = this.tree.columns.map(c => (c === 's29' ? theta : F[c]));
     const reading = predictTree(this.tree, row);
     const star = this.tree.star_scale.a + this.tree.star_scale.b * reading;
     // 4. rice / face items and the OD8 (OD9) reading
-    const sub = withSub ? await this.subReadings({ tk, od, v1a, lnV2, tapV2, ls, theta, flag, star, rate, pool: usePool ? this.pool : null }) : null;
+    const sub = withSub ? await this.subReadings({ tk, od, v1a, lnV2, tapV2, ls, theta, flag, star, rate, hit, pool: usePool ? this.pool : null }) : null;
     // flags
     const sv = svFracSafe(text);
     const sb = sbLines(text);
     const reasons = [];
-    // DT: ranges of the ranked charts played at 1.5x (support-dt.json); HT has no rate-specific answers -> the 1.0x ranges
-    const S = rate === 1.5 ? this.supportDt : this.support;
-    const onWhat = rate === 1.5 ? '排名谱 DT 读数' : '排名谱';
+    // DT: ranges of the ranked charts played at 1.5x (support-dt.json); HT has no rate-specific answers -> the 1.0x ranges.
+    // Other rates take the nearer of the two answered rates (above 1.25x -> the DT ranges).
+    const dtRanges = rate > 1.25;
+    const S = dtRanges ? this.supportDt : this.support;
+    const onWhat = dtRanges ? '排名谱 DT 读数' : '排名谱';
     if (star > S.star.max) reasons.push(`星数高于所有${onWhat}的最高读数（${S.star.max.toFixed(2)}）`);
     if (flag.startsWith('censored')) reasons.push('难度超出参照水平路径的两端（读数被截断）');
     else if (theta < S.s29.min || theta > S.s29.max) reasons.push(`参照水平读数（θ*）超出${onWhat}范围`);
@@ -124,13 +132,13 @@ export class Engine {
     }
     let tmax = 0;
     for (const n of notes) tmax = Math.max(tmax, n[1], n[0]);
-    return { rate, star, reading, theta, thetaFlag: flag, nNotes: tk.nNotes, nActions: tk.nActions, od, durationS: tmax / 1000 / rate,
+    return { rate, hit, odOverride, star, reading, theta, thetaFlag: flag, nNotes: tk.nNotes, nActions: tk.nActions, od, durationS: tmax / 1000 / rate,
       features: F, acc: Array.from(acc), reliable: !(flags.sv || flags.storyboard || flags.outOfRange), flags, segments, hardest, sub };
   }
 
   // research repo analysis/rice-ln-od-r1/rlo_core.readings: rice = taps (not LN head, not release) on the ScoreV1 curve at 96 %;
   // face = LN heads + tails on the ScoreV2 curve at 97 %; OD = whole chart re-judged at OD8 (OD9 from 6.3 stars) at 96 % ScoreV1
-  async subReadings({ tk, od, v1a, lnV2, tapV2, ls, theta, flag, star, rate, pool }) {
+  async subReadings({ tk, od, v1a, lnV2, tapV2, ls, theta, flag, star, rate, hit = '', pool }) {
     const t0 = performance.now();
     const P = this.reader.P, A = tk.nActions, L = tk.lnH.length, b = this.tree.star_scale.b;
     const head = new Uint8Array(A);
@@ -171,7 +179,7 @@ export class Engine {
     const v2 = { theta: v2Theta, flag: v2Flag, star: subStar(star, theta, v2Theta, b) };
     const odUsed = star >= OD9_FROM ? 9 : 8;
     let odTheta = theta, odFlag = flag;
-    if (odUsed !== od) ({ theta: odTheta, flag: odFlag } = this.reader.theta(await this.reader.accAtOd(ls, tk, odUsed, pool, rate)));
+    if (odUsed !== od) ({ theta: odTheta, flag: odFlag } = this.reader.theta(await this.reader.accAtOd(ls, tk, odUsed, pool, rate, hit)));
     const odItem = { od: odUsed, fileOd: od, theta: odTheta, flag: odFlag, star: subStar(star, theta, odTheta, b), changed: odUsed !== od };
     return { rice, face, od: odItem, v2, ms: performance.now() - t0 };
   }

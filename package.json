@@ -8,7 +8,9 @@
     "test": "node tests/compare.mjs",
     "test:references": "node tests/dan-reference.mjs",
     "test:ladder": "node --test tests/acc-ladder.mjs",
-    "test:items": "node tests/rice-ln-od.mjs"
+    "test:items": "node tests/rice-ln-od.mjs",
+    "test:mods": "node tests/compare_mods.mjs",
+    "build:tosu": "node tools/build-tosu.mjs"
   },
   "dependencies": {
     "fflate": "0.8.3",

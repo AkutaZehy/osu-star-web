@@ -48,6 +48,8 @@ async function handle(m) {
       result = await engine.scoreBytes(m.bytes instanceof Uint8Array ? m.bytes : new Uint8Array(m.bytes), {
         oszHasOsb: !!m.oszHasOsb,
         rate: m.rate || 1,
+        hit: m.hit || '',
+        odOverride: Number.isFinite(m.odOverride) ? m.odOverride : null,
         withSub: !!m.withSub,
         onProgress: (stage, pct) => {
           const p = Math.round(pct);

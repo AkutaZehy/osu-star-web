@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>osu!mania 4K 星数</title>
+<link rel="stylesheet" href="counter.css">
+</head>
+<body>
+<main id="card" aria-live="polite">
+  <div class="top">
+    <span id="star" class="star dim">–</span><span class="unit">★</span>
+    <span id="mod" class="mod" hidden></span>
+  </div>
+  <div id="title" class="title"></div>
+  <div id="status" class="status"></div>
+  <div id="tags" class="tags"></div>
+  <div id="hint" class="hint">请在选歌界面打开本插件，不要在打歌途中启用：首次加载模型和计算会占用 CPU，可能造成卡顿。打歌时插件会自动暂停计算。</div>
+  <div class="foot">树星数 v1（P1h）· 社区试用读数，非官方星数</div>
+</main>
+<script type="module" src="counter.js"></script>
+</body>
+</html>

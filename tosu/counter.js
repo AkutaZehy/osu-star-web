@@ -1,0 +1,213 @@
+// tosu counter: listens to tosu's v2 websocket, fetches the current .osu from tosu and scores it with the same P1h reader
+// as the web page (js/worker.js, unchanged). Nothing is computed while a map is being played: the model is loaded only
+// outside gameplay, and a computation still running when a play starts is stopped and redone afterwards.
+import { readMods } from './mods.js';
+import { VERSION, FROZEN } from './js/engine.js';
+
+const qs = new URLSearchParams(location.search);
+const HELPERS = Math.max(0, Math.min(8, parseInt(qs.get('helpers') || '0', 10) || 0));
+const WS_URL = qs.get('ws') || `ws://${location.host}/websocket/v2`;
+const FILE_URL = '/files/beatmap/file';
+const STATE_PLAY = 2;            // tosu GameState.play
+const DEBOUNCE_MS = 400;         // song select scrolling: wait until the selection settles
+const CACHE_KEY = `osu-star-tosu|${FROZEN}|`;
+const CACHE_MAX = 400;
+
+const $ = id => document.getElementById(id);
+const S = {
+  ws: null, worker: null, helpers: [], phase: 'idle',   // idle | loading | ready | error
+  playing: null, key: null, info: null, job: null, jobId: 0, timer: null, retries: 0, connected: false,
+  cache: loadCache(),
+};
+
+if (qs.get('hint') === '0') $('hint').hidden = true;
+connect();
+
+// ---------------------------------------------------------------- tosu websocket
+function connect() {
+  let ws;
+  try { ws = new WebSocket(WS_URL); } catch (e) { return retryConnect(); }
+  S.ws = ws;
+  ws.onopen = () => { S.connected = true; render(); };
+  ws.onclose = () => { S.connected = false; render(); retryConnect(); };
+  ws.onerror = () => {};
+  ws.onmessage = ev => {
+    let d;
+    try { d = JSON.parse(ev.data); } catch (e) { return; }
+    onTosu(d);
+  };
+}
+function retryConnect() { setTimeout(connect, 2000); }
+
+function onTosu(d) {
+  const playing = !!(d.state && d.state.number === STATE_PLAY);
+  const bm = d.beatmap || {};
+  const mods = readMods(d.play && d.play.mods);
+  const info = {
+    checksum: bm.checksum || '', mode: bm.mode ? bm.mode.number : null,
+    title: [bm.artist, bm.title].filter(Boolean).join(' - '), version: bm.version || '', mods,
+  };
+  const key = info.checksum ? `${info.checksum}#${mods.ok ? mods.key : 'unsupported'}` : null;
+  const wasPlaying = S.playing;
+  S.playing = playing;
+  if (playing && wasPlaying !== true) enterPlay();
+  if (key !== S.key) { S.key = key; S.info = info; S.retries = 0; render(); schedule(); }
+  else if (!playing && wasPlaying === true) { render(); schedule(); }
+  else if (wasPlaying !== playing) render();
+}
+
+// ---------------------------------------------------------------- gameplay guard
+function enterPlay() {
+  // stop anything that uses the CPU; the current map is scored again after the play if it was not finished
+  if (S.phase === 'loading' || S.job) stopWorker();
+  clearTimeout(S.timer);
+}
+
+function stopWorker() {
+  if (S.worker) S.worker.terminate();
+  for (const h of S.helpers) h.terminate();
+  S.worker = null; S.helpers = []; S.phase = 'idle'; S.job = null;
+}
+
+// ---------------------------------------------------------------- scheduling
+function schedule() {
+  clearTimeout(S.timer);
+  if (S.playing) return;
+  S.timer = setTimeout(run, DEBOUNCE_MS);
+}
+
+async function run() {
+  const info = S.info, key = S.key;
+  if (S.playing || !info || !key) return;
+  if (!info.mods.ok || info.mode !== 3 || S.cache.has(key)) return render();
+  if (S.job) return;                       // one at a time; finish() picks up the latest selection
+  if (S.phase !== 'ready') return startWorker();
+  const id = ++S.jobId;
+  S.job = { id, key, pct: 0, checksum: info.checksum };
+  render();
+  let bytes;
+  try {
+    const r = await fetch(`${FILE_URL}?k=${encodeURIComponent(key)}`, { cache: 'no-store' });
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    bytes = new Uint8Array(await r.arrayBuffer());
+  } catch (e) {
+    return finish(id, { ok: false, reason: 'fetch', message: '读不到谱面文件（' + String(e.message || e) + '）' });
+  }
+  if (!S.job || S.job.id !== id) return;   // stopped by a play in the meantime
+  const m = info.mods;
+  S.worker.postMessage({ type: 'score', id, bytes, rate: m.rate, hit: m.hit, odOverride: m.od, withSub: false }, [bytes.buffer]);
+}
+
+function finish(id, res) {
+  const job = S.job;
+  if (!job || job.id !== id) return;
+  S.job = null;
+  // tosu may already serve the next map's file while the websocket still reports the old checksum: try again shortly
+  if (res.ok && res.md5 && job.checksum && res.md5 !== job.checksum) {
+    if (S.retries++ < 3) { S.timer = setTimeout(run, 500); return; }
+    res = { ok: false, reason: 'md5', message: '谱面文件与当前选中的谱对不上，请重新选一次' };
+  }
+  if (res.reason !== 'fetch' && res.reason !== 'md5') saveResult(job.key, res);
+  else S.failed = { key: job.key, res };
+  render();
+  if (S.key !== job.key) schedule();
+}
+
+// ---------------------------------------------------------------- worker
+function startWorker() {
+  if (S.phase === 'loading') return;
+  S.phase = 'loading';
+  render();
+  let w;
+  try { w = new Worker(new URL('./js/worker.js', import.meta.url), { type: 'module' }); }
+  catch (e) { S.phase = 'error'; S.error = '无法启动计算模块（浏览器不支持模块 Worker）'; return render(); }
+  S.worker = w;
+  const ports = [];
+  for (let i = 0; i < HELPERS; i++) {
+    try {
+      const h = new Worker(new URL('./js/sl-worker.js', import.meta.url), { type: 'module' });
+      const ch = new MessageChannel();
+      h.postMessage({ type: 'port', port: ch.port1 }, [ch.port1]);
+      S.helpers.push(h); ports.push(ch.port2);
+    } catch (e) { break; }
+  }
+  w.onmessage = ev => {
+    const m = ev.data;
+    if (w !== S.worker) return;
+    if (m.type === 'ready') { S.phase = 'ready'; render(); schedule(); }
+    else if (m.type === 'progress') { if (S.job && S.job.id === m.id) { S.job.pct = m.pct; render(); } }
+    else if (m.type === 'result') finish(m.id, m.result);
+    else if (m.type === 'error') {
+      if (S.phase === 'loading') { S.phase = 'error'; S.error = m.message; render(); }
+      else if (S.job) finish(S.job.id, { ok: false, reason: 'error', message: m.message });
+    }
+  };
+  w.onerror = ev => {
+    if (w !== S.worker) return;
+    S.phase = 'error'; S.error = '计算模块出错：' + (ev && ev.message ? ev.message : '文件无法加载');
+    S.job = null; render();
+  };
+  w.postMessage({ type: 'init', ports }, ports);
+}
+
+// ---------------------------------------------------------------- cache (per browser, survives restarts)
+function loadCache() {
+  const m = new Map();
+  try {
+    const raw = JSON.parse(localStorage.getItem(CACHE_KEY + 'results') || '[]');
+    for (const [k, v] of raw) m.set(k, v);
+  } catch (e) { /* no storage: keep the results of this session only */ }
+  return m;
+}
+function saveResult(key, res) {
+  const keep = res.ok
+    ? { ok: true, star: res.star, reliable: res.reliable, thetaFlag: res.thetaFlag, md5: res.md5,
+        flags: { sv: res.flags.sv, storyboard: res.flags.storyboard, outOfRangeReasons: res.flags.outOfRangeReasons, jackHeavy: res.flags.jackHeavy } }
+    : { ok: false, reason: res.reason, message: res.message };
+  S.cache.delete(key);
+  S.cache.set(key, keep);
+  while (S.cache.size > CACHE_MAX) S.cache.delete(S.cache.keys().next().value);
+  try { localStorage.setItem(CACHE_KEY + 'results', JSON.stringify([...S.cache])); } catch (e) { /* full or blocked */ }
+}
+
+// ---------------------------------------------------------------- view
+function render() {
+  const info = S.info;
+  const res = S.key ? S.cache.get(S.key) || (S.failed && S.failed.key === S.key ? S.failed.res : null) : null;
+  $('title').textContent = info && info.checksum ? `${info.title}${info.version ? ` [${info.version}]` : ''}` : '';
+  $('mod').textContent = info ? (info.mods.ok ? info.mods.label : '不支持的 Mod') : '';
+  $('mod').hidden = !info;
+  const starEl = $('star');
+  const tags = [];
+  let status = '', star = '–', dim = true;
+  if (!S.connected) status = '连不上 tosu，重连中…（请确认 tosu 已运行）';
+  else if (!info || !info.checksum) status = '等待 tosu 报告谱面…';
+  else if (!info.mods.ok) status = info.mods.why;
+  else if (info.mode !== 3) status = '不是 osu!mania 谱面（转谱不支持）';
+  else if (res && res.ok) {
+    star = res.star.toFixed(2); dim = false;
+    if (!info.mods.tested) tags.push(['warn', info.mods.untested.join('；')]);
+    if (!res.reliable) {
+      const why = [];
+      if (res.flags.sv) why.push('明显变速（SV）');
+      if (res.flags.storyboard) why.push('带 storyboard');
+      if (res.flags.outOfRangeReasons && res.flags.outOfRangeReasons.length) why.push(res.flags.outOfRangeReasons[0]);
+      tags.push(['bad', '不可靠：' + why.join('、')]);
+    }
+    if (res.flags.jackHeavy) tags.push(['warn', 'jack 很多：这类谱读数常偏低约一段']);
+  } else if (res) status = res.message;
+  else if (S.playing) status = '打歌中：暂停计算，回到选歌界面后再算';
+  else if (S.phase === 'error') status = S.error || '模型加载失败';
+  else if (S.phase === 'loading') status = '加载模型中…';
+  else if (S.job) status = `计算中 ${S.job.pct}%`;
+  else status = '准备计算…';
+  if (info && info.mods.ok && info.mods.notes.length && !dim) tags.push(['info', info.mods.notes.join('；')]);
+  starEl.textContent = star;
+  starEl.classList.toggle('dim', dim);
+  $('status').textContent = status;
+  $('status').hidden = !status;
+  const box = $('tags');
+  box.replaceChildren(...tags.map(([k, t]) => { const s = document.createElement('div'); s.className = 'tag ' + k; s.textContent = t; return s; }));
+}
+render();
+document.title = `${VERSION} · tosu`;
