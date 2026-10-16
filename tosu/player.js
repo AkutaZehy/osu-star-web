@@ -2,8 +2,16 @@
 // Each finished play gives one level reading with the web page's acc ladder (js/acc-ladder.js, the "达成水平" table read
 // backwards): the level at which this chart's acc line equals the play's ScoreV1 acc. The player level is the mean of the
 // last N usable readings; the expected acc on a chart is the ladder read forwards at that level.
-// Not validated as a predictor: one play reads the level with a spread of about 0.5-0.8 stars (acc-ladder.json reverse).
+// Backtest (research repo docs/player-level-backtest-r1-results-2026-10-16.md; 72 players, ~89k finished NoMod ranked plays,
+// last 5 plays -> next play): the level read back from the next play falls within LEVEL_BAND of the estimate 8 times in 10
+// (10th / 90th percentiles), about 80 % coverage when the chart is within 1 star of the level. On charts more than
+// TOO_HARD stars above the level the rule is far too low for the finished plays (median +4-9 points), so no number.
 import { ladderStar, logSlope, yOf } from './js/acc-ladder.js';
+
+export const LEVEL_BAND = { lo: -0.62, hi: 0.64 };   // stars, 10th / 90th percentile of the backtest level error
+export const TOO_HARD = 1;                           // chart star - level above this: no expected acc
+export const WIDE_SPREAD = 2.5;                      // max - min level of the window: interval may be too narrow
+export const NOVICE_BELOW = 3;                       // level below this: intervals measured wider
 
 /** stable ScoreV1 accuracy (%) from tosu hit counts (geki = MAX, katu = 200); null without objects. */
 export function scoreV1Acc(h) {
@@ -55,4 +63,16 @@ export function fmtExpectedAcc(P, t) {
   if (t < lo) return `低于 ${lo}%`;
   if (t > hi) return `高于 ${hi}%`;
   return `${t.toFixed(1)}%`;
+}
+
+/**
+ * What the card shows for one chart: { tooHard, gap } when the chart is more than TOO_HARD stars above the level,
+ * otherwise { acc, lo, hi } (ScoreV1 %, the 8-in-10 interval from LEVEL_BAND, capped at 100).
+ */
+export function predictView(P, level, star96, rate = 1) {
+  const gap = star96 - level;
+  if (gap > TOO_HARD) return { tooHard: true, gap };
+  const cap = t => Math.min(t, 100);
+  return { tooHard: false, gap, acc: cap(expectedAcc(P, level, star96, rate)),
+    lo: cap(expectedAcc(P, level + LEVEL_BAND.lo, star96, rate)), hi: cap(expectedAcc(P, level + LEVEL_BAND.hi, star96, rate)) };
 }

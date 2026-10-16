@@ -4,7 +4,8 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import test from 'node:test';
 import { validateLadder, ladderStar } from '../docs/js/acc-ladder.js';
-import { scoreV1Acc, playLevel, expectedAcc, usableAcc, estimateLevel, fmtExpectedAcc } from '../dist/osu-star-tosu/player.js';
+import { scoreV1Acc, playLevel, expectedAcc, usableAcc, estimateLevel, fmtExpectedAcc, predictView, LEVEL_BAND, TOO_HARD }
+  from '../dist/osu-star-tosu/player.js';
 
 const P = validateLadder(JSON.parse(fs.readFileSync(new URL('../docs/model/acc-ladder.json', import.meta.url), 'utf8')));
 
@@ -58,4 +59,23 @@ test('expected acc text', () => {
   assert.equal(fmtExpectedAcc(P, 94.26), '94.3%');
   assert.equal(fmtExpectedAcc(P, 80), '低于 85%');
   assert.equal(fmtExpectedAcc(P, 99.9), '高于 99.5%');
+});
+
+test('8-in-10 interval and the too-hard rule', () => {
+  const v = predictView(P, 5.5, 5.5);
+  assert.equal(v.tooHard, false);
+  assert.ok(v.lo < v.acc && v.acc < v.hi && v.hi <= 100);
+  assert.ok(Math.abs(v.lo - expectedAcc(P, 5.5 + LEVEL_BAND.lo, 5.5)) < 1e-12);
+  assert.ok(Math.abs(v.hi - expectedAcc(P, 5.5 + LEVEL_BAND.hi, 5.5)) < 1e-12);
+  // backtest example (level 5.5): 4.5-star chart 98.4 % (97.1-99.2), 5.5-star chart 96.0 % (92.5-98.0)
+  const easy = predictView(P, 5.5, 4.5);
+  assert.equal(easy.acc.toFixed(1), '98.4');
+  assert.equal(easy.lo.toFixed(1), '97.1');
+  assert.equal(easy.hi.toFixed(1), '99.2');
+  assert.equal(v.acc.toFixed(1), '96.0');
+  assert.equal(v.lo.toFixed(1), '92.5');
+  assert.equal(v.hi.toFixed(1), '98.0');
+  assert.equal(predictView(P, 5.5, 5.5 + TOO_HARD).tooHard, false);
+  assert.equal(predictView(P, 5.5, 5.5 + TOO_HARD + 0.01).tooHard, true);
+  assert.ok(predictView(P, 9, 2).hi <= 100);
 });

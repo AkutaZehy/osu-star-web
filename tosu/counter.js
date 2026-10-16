@@ -7,7 +7,7 @@ import { danEstimate } from './js/dan-estimate.js';
 import { validateDanReferences, referencesForModel } from './js/dan-reference.js';
 import { buildSegmentsSvg, fmtTime } from './js/ui-lib.js';
 import { validateLadder } from './js/acc-ladder.js';
-import { scoreV1Acc, playLevel, usableAcc, estimateLevel, expectedAcc, fmtExpectedAcc } from './player.js';
+import { scoreV1Acc, playLevel, usableAcc, estimateLevel, fmtExpectedAcc, predictView, WIDE_SPREAD, NOVICE_BELOW } from './player.js';
 
 const qs = new URLSearchParams(location.search);
 const clampHelpers = v => Math.max(0, Math.min(8, Math.round(Number(v)) || 0));
@@ -301,12 +301,19 @@ function renderPlayer(res) {
     line(`我的水平：已有 ${est.used.length}/${est.needed} 局可用成绩（完整打完的 4K 谱，acc 85%–99%）`, 'muted');
     return;
   }
-  const range = est.used.length > 1 ? `，单局 ${est.lo.toFixed(1)}–${est.hi.toFixed(1)}` : '';
-  line(`我的水平 ≈ ${est.level.toFixed(2)} 星（近 ${est.used.length} 局${range}）· 实验`);
   if (res && res.ok) {
-    const rate = S.info && S.info.mods.ok ? S.info.mods.rate : 1;
-    line(`这张谱预计 acc ≈ ${fmtExpectedAcc(P, expectedAcc(P, est.level, res.star, rate))}（ScoreV1）`, 'strong');
+    const m = S.info && S.info.mods.ok ? S.info.mods : { rate: 1, hit: '', od: null };
+    const v = predictView(P, est.level, res.star, m.rate);
+    if (v.tooHard) line(`比你最近的水平难 ${v.gap.toFixed(1)} 星：回测里这种谱打完的局多半比公式高很多，预计不可靠`, 'warn');
+    else line(`预计 acc ${fmtExpectedAcc(P, v.acc)}（十局约八局在 ${fmtExpectedAcc(P, v.lo)} ～ ${fmtExpectedAcc(P, v.hi)}）`, 'strong');
+    const tested = m.rate === 1 && !m.hit && m.od === null;
+    line(`按最近 ${est.used.length} 局估的水平 ${est.level.toFixed(2)} 星（单局 ${est.lo.toFixed(1)}–${est.hi.toFixed(1)}）· `
+      + (tested ? '区间按回测给出，只测过 NoMod 排名谱、打完的局' : '开了 Mod：区间未经检验（回测只有 NoMod）'), 'muted');
+  } else {
+    line(`我的水平 ≈ ${est.level.toFixed(2)} 星（近 ${est.used.length} 局，单局 ${est.lo.toFixed(1)}–${est.hi.toFixed(1)}）`);
   }
+  if (est.hi - est.lo >= WIDE_SPREAD) line('最近几局起伏大，区间可能偏窄', 'warn');
+  if (est.level < NOVICE_BELOW) line('3 星以下实测更宽：十局约八局在 −3 / +9 个百分点内', 'warn');
 }
 
 // ---------------------------------------------------------------- cache (per browser, survives restarts)
