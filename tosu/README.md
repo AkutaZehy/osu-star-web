@@ -1,6 +1,9 @@
 # osu!mania 4K 星数 · tosu 插件（试用）
 
 把网页版星数工具（树星数 v1 / P1h）做成 [tosu](https://github.com/tosuapp/tosu) 计数器。
+
+> ⚠️ **没在真实 tosu 里测试过。** 作者本机没装 tosu，只在自己写的模拟 tosu（`tools/mock-tosu.mjs`）上测过，直接发出来了，就是这么大胆。
+> 能不能用、哪里坏了，欢迎到 [Issues](https://github.com/sky2002/osu-star-web/issues/new) 反馈。
 选歌时自动读出当前谱面的星数，同时考虑当前 Mod。读数和网页版是同一套计算，全部在本机进行，不上传谱面。
 
 > **请在选歌界面打开本插件，不要在打歌途中启用。**

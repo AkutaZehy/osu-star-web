@@ -8,7 +8,7 @@
 
 当前版本：**树星数 v1**（P1h，2026-10-14）。这是试用中的社区难度读数，不是 osu! 官方星数。
 
-另有 **tosu 插件**（试用）：选歌时自动读出当前谱面和 Mod 的星数，见 [tosu/README.md](tosu/README.md)。
+另有 **tosu 插件**（试用）：选歌时自动读出当前谱面和 Mod 的星数，见 [tosu/README.md](tosu/README.md)，安装包在 [Releases](https://github.com/sky2002/osu-star-web/releases)。插件还没在真实 tosu 里测试过。
 
 ## 怎么用
 

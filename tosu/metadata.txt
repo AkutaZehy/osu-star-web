@@ -5,4 +5,4 @@ Author: sky2002
 CompatibleWith: tosu
 Resolution: 380 x 220
 authorLinks: https://github.com/sky2002/osu-star-web
-Notes: osu!mania 4K 社区试用星数（树星数 v1 / P1h），本地计算，不上传谱面。请在选歌界面打开，不要在打歌途中启用。
+Notes: osu!mania 4K 社区试用星数（树星数 v1 / P1h），本地计算，不上传谱面。请在选歌界面打开，不要在打歌途中启用。未在真实 tosu 中测试过。
